@@ -12,3 +12,4 @@ with st.sidebar:
         st.rerun()
 
 st.info("门店列表与座位预约功能开发中……")
+a = 1
