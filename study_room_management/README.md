@@ -128,8 +128,9 @@ mysql -u root -p study_room < db/sql/03_seed.sql
 # 3. 安装依赖
 pip install -r requirements.txt
 
-# 4. 配置数据库连接
-#    编辑 config.py，填入本机 MySQL 的 host / port / user / password
+# 4. 配置数据库连接（密码放本地 .env，不进仓库）
+copy .env.example .env
+#    然后编辑 .env，把 DB_PASSWORD 改成你本机 MySQL 的密码
 
 # 5. 启动
 python -m streamlit run app.py
