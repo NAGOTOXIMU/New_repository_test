@@ -1,7 +1,8 @@
 """用户业务：注册、登录。本文件不写 SQL，只做校验和调用 repository。"""
 import pymysql
 
-from repository import user_repo
+from repository import (recharge_repo, reservation_repo, user_card_repo,
+                        user_repo)
 from services.exceptions import BizError
 from services.password import hash_password, verify_password
 
@@ -47,3 +48,41 @@ def login(username, password):
     user.pop("password")        # 哈希值不能传到界面层
     user["role"] = "user"       # 管理员登录走 admin_service，那里写 "admin"
     return user
+
+
+# ═══════════════════════════════════════════════════════════════
+# 管理端接口
+# ═══════════════════════════════════════════════════════════════
+
+def list_users_paged(keyword=None, page=1, page_size=20):
+    """管理端用户列表。返回 (列表, 总数)。"""
+    offset = (max(page, 1) - 1) * page_size
+    return (user_repo.list_paged(keyword, offset, page_size),
+            user_repo.count(keyword))
+
+
+def get_user_detail(user_id):
+    """用户详情：基本信息 + 持仓卡 + 最近预约 + 最近充值。"""
+    user = user_repo.get_by_id(user_id)
+    if user is None:
+        raise BizError("用户不存在")
+
+    cards = user_card_repo.list_by_user(user_id)
+    reservations = reservation_repo.list_by_user(user_id, 0, 10)
+    recharges = recharge_repo.list_by_user(user_id, 0, 10)
+
+    return {
+        "user": user,
+        "cards": cards,
+        "reservations": reservations,
+        "recharges": recharges,
+    }
+
+
+def set_user_status(user_id, status):
+    """冻结 / 解冻。status 取 '正常' 或 '冻结'。"""
+    if status not in ("正常", "冻结"):
+        raise BizError("用户状态只能是「正常」或「冻结」")
+    if user_repo.get_by_id(user_id) is None:
+        raise BizError("用户不存在")
+    return user_repo.update_status(user_id, status)

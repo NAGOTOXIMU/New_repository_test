@@ -177,8 +177,10 @@ def list_my_orders(user_id, page=1, page_size=20):
             reservation_repo.count_by_user(user_id))
 
 
-def list_orders(store_id=None, status=None, page=1, page_size=20):
+def list_orders(store_id=None, status=None, start_date=None, end_date=None,
+                page=1, page_size=20):
     """管理端订单列表。返回 (数据列表, 总条数)。"""
     offset = (max(page, 1) - 1) * page_size
-    return (reservation_repo.list_paged(store_id, status, offset, page_size),
-            reservation_repo.count_paged(store_id, status))
+    return (reservation_repo.list_paged(store_id, status, start_date, end_date,
+                                        offset, page_size),
+            reservation_repo.count_paged(store_id, status, start_date, end_date))

@@ -90,26 +90,44 @@ def count_by_user(user_id):
         return row["n"] if row else 0
 
 
-def list_paged(status=None, offset=0, limit=20):
-    """管理端列表。"""
+def list_paged(status=None, start_date=None, end_date=None, offset=0, limit=20):
+    """管理端列表，可按状态、下单日期筛。"""
     sql = _JOINED
-    params = []
+    where, params = [], []
     if status:
-        sql += "WHERE r.status = %s "
+        where.append("r.status = %s")
         params.append(status)
-    sql += "ORDER BY r.recharge_id DESC LIMIT %s OFFSET %s"
+    if start_date:
+        where.append("DATE(r.created_at) >= %s")
+        params.append(start_date)
+    if end_date:
+        where.append("DATE(r.created_at) <= %s")
+        params.append(end_date)
+    if where:
+        sql += " WHERE " + " AND ".join(where)
+    sql += " ORDER BY r.recharge_id DESC LIMIT %s OFFSET %s"
     params += [limit, offset]
     with read_cursor() as cur:
         cur.execute(sql, params)
         return cur.fetchall()
 
 
-def count_paged(status=None):
+def count_paged(status=None, start_date=None, end_date=None):
+    where, params = [], []
+    if status:
+        where.append("status = %s")
+        params.append(status)
+    if start_date:
+        where.append("DATE(created_at) >= %s")
+        params.append(start_date)
+    if end_date:
+        where.append("DATE(created_at) <= %s")
+        params.append(end_date)
+    sql = "SELECT COUNT(*) AS n FROM recharge"
+    if where:
+        sql += " WHERE " + " AND ".join(where)
     with read_cursor() as cur:
-        if status:
-            cur.execute("SELECT COUNT(*) AS n FROM recharge WHERE status = %s", (status,))
-        else:
-            cur.execute("SELECT COUNT(*) AS n FROM recharge")
+        cur.execute(sql, params)
         row = cur.fetchone()
         return row["n"] if row else 0
 

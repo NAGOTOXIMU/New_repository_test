@@ -103,8 +103,8 @@ def list_my_recharges(user_id, page=1, page_size=20):
             recharge_repo.count_by_user(user_id))
 
 
-def list_all(status=None, page=1, page_size=20):
+def list_all(status=None, start_date=None, end_date=None, page=1, page_size=20):
     """管理端充值订单列表。返回 (数据列表, 总条数)。"""
     offset = (max(page, 1) - 1) * page_size
-    return (recharge_repo.list_paged(status, offset, page_size),
-            recharge_repo.count_paged(status))
+    return (recharge_repo.list_paged(status, start_date, end_date, offset, page_size),
+            recharge_repo.count_paged(status, start_date, end_date))

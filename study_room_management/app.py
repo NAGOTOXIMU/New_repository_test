@@ -14,7 +14,19 @@ if "user" not in st.session_state:
     st.stop()
 
 # ——— 已登录：组装导航（页面写好了就往这里加） ———
-pages = [
-    st.Page("ui/pages/user/1_home_store.py", title="首页与门店", icon="🏠"),
-]
+role = st.session_state["user"].get("role")
+pages = []
+
+if role == "admin":
+    pages += [
+        st.Page("ui/pages/admin/1_store_seat_manage.py", title="门店与座位管理", icon="🏪"),
+        st.Page("ui/pages/admin/2_card_type_manage.py", title="卡种管理", icon="💳"),
+        st.Page("ui/pages/admin/3_order_manage.py", title="订单管理", icon="📋"),
+        st.Page("ui/pages/admin/4_user_manage.py", title="用户管理", icon="👥"),
+    ]
+else:
+    pages += [
+        st.Page("ui/pages/user/1_home_store.py", title="首页与门店", icon="🏠"),
+    ]
+
 st.navigation(pages).run()

@@ -110,8 +110,9 @@ def count_by_user(user_id):
         return row["n"] if row else 0
 
 
-def list_paged(store_id=None, status=None, offset=0, limit=20):
-    """管理端订单列表，可按门店和状态筛。"""
+def list_paged(store_id=None, status=None, start_date=None, end_date=None,
+               offset=0, limit=20):
+    """管理端订单列表，可按门店、状态、预约日期筛。"""
     where, params = [], []
     if store_id:
         where.append("st.store_id = %s")
@@ -119,6 +120,12 @@ def list_paged(store_id=None, status=None, offset=0, limit=20):
     if status:
         where.append("r.status = %s")
         params.append(status)
+    if start_date:
+        where.append("r.reserve_date >= %s")
+        params.append(start_date)
+    if end_date:
+        where.append("r.reserve_date <= %s")
+        params.append(end_date)
     sql = _JOINED + (" WHERE " + " AND ".join(where) if where else "")
     sql += " ORDER BY r.reservation_id DESC LIMIT %s OFFSET %s"
     params += [limit, offset]
@@ -127,7 +134,7 @@ def list_paged(store_id=None, status=None, offset=0, limit=20):
         return cur.fetchall()
 
 
-def count_paged(store_id=None, status=None):
+def count_paged(store_id=None, status=None, start_date=None, end_date=None):
     """配合 list_paged 算总数。"""
     sql = ("SELECT COUNT(*) AS n FROM reservation r "
            "JOIN seat s ON r.seat_id = s.seat_id "
@@ -139,6 +146,12 @@ def count_paged(store_id=None, status=None):
     if status:
         where.append("r.status = %s")
         params.append(status)
+    if start_date:
+        where.append("r.reserve_date >= %s")
+        params.append(start_date)
+    if end_date:
+        where.append("r.reserve_date <= %s")
+        params.append(end_date)
     if where:
         sql += " WHERE " + " AND ".join(where)
     with read_cursor() as cur:
