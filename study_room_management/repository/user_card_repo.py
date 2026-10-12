@@ -162,4 +162,5 @@ def update_status(card_id, status):
 def count_by_user(user_id):
     with read_cursor() as cur:
         cur.execute("SELECT COUNT(*) AS n FROM user_card WHERE user_id = %s", (user_id,))
-        return cur.fetchone()["n"]
+        row = cur.fetchone()
+        return row["n"] if row else 0

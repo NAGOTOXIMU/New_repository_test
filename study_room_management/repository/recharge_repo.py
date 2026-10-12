@@ -86,7 +86,8 @@ def list_by_user(user_id, offset=0, limit=20):
 def count_by_user(user_id):
     with read_cursor() as cur:
         cur.execute("SELECT COUNT(*) AS n FROM recharge WHERE user_id = %s", (user_id,))
-        return cur.fetchone()["n"]
+        row = cur.fetchone()
+        return row["n"] if row else 0
 
 
 def list_paged(status=None, offset=0, limit=20):
@@ -109,7 +110,8 @@ def count_paged(status=None):
             cur.execute("SELECT COUNT(*) AS n FROM recharge WHERE status = %s", (status,))
         else:
             cur.execute("SELECT COUNT(*) AS n FROM recharge")
-        return cur.fetchone()["n"]
+        row = cur.fetchone()
+        return row["n"] if row else 0
 
 
 def sum_amount(start_date=None, end_date=None):
@@ -124,7 +126,8 @@ def sum_amount(start_date=None, end_date=None):
         else:
             cur.execute("SELECT IFNULL(SUM(amount), 0) AS total FROM recharge "
                         "WHERE status = '已支付'")
-        return cur.fetchone()["total"]
+        row = cur.fetchone()
+        return row["total"] if row else 0
 
 
 def revenue_by_day(start_date, end_date):

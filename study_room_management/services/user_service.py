@@ -28,12 +28,8 @@ def register(username, password, real_name, phone, email=None):
         # 并发下两个请求同时通过查重时会撞唯一索引，这里兜一句人话
         raise BizError("这个用户名或手机号已经被注册了")
 
-    return {
-        "user_id": user_id,
-        "username": username,
-        "real_name": real_name,
-        "role": "user",
-    }
+    # 结构和 login() 的返回值保持一致，界面层可以混用
+    return {**user_repo.get_by_id(user_id), "role": "user"}
 
 
 def login(username, password):

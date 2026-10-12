@@ -67,6 +67,8 @@ def check_connection() -> tuple[bool, str]:
         with conn.cursor() as cur:
             cur.execute("SELECT VERSION() AS version, DATABASE() AS db")
             row = cur.fetchone()
+        if not row:
+            return False, "查询没有返回结果"
         return True, f"连接成功：MySQL {row['version']}，当前库 {row['db']}"
     except Exception as e:
         return False, f"已连上但查询失败：{e}"

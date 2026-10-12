@@ -35,7 +35,8 @@ def list_paged(offset=0, limit=20):
 def count():
     with read_cursor() as cur:
         cur.execute("SELECT COUNT(*) AS n FROM card_type")
-        return cur.fetchone()["n"]
+        row = cur.fetchone()
+        return row["n"] if row else 0
 
 
 def create(name, kind, price, face_value=None, total_times=None,

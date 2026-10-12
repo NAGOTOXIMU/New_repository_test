@@ -24,7 +24,8 @@ def get_by_username(username):
 def exists_username(username):
     with read_cursor() as cur:
         cur.execute("SELECT COUNT(*) AS n FROM admin WHERE username = %s", (username,))
-        return cur.fetchone()["n"] > 0
+        row = cur.fetchone()
+        return bool(row and row["n"] > 0)
 
 
 def create(username, password_hash, real_name, phone=None, store_id=None):
@@ -53,7 +54,8 @@ def list_paged(offset=0, limit=20):
 def count():
     with read_cursor() as cur:
         cur.execute("SELECT COUNT(*) AS n FROM admin")
-        return cur.fetchone()["n"]
+        row = cur.fetchone()
+        return row["n"] if row else 0
 
 
 def update_profile(admin_id, real_name=None, phone=None, store_id=None):

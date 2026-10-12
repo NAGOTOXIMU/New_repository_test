@@ -28,14 +28,16 @@ def exists_username(username):
     """用户名是否已被注册。"""
     with read_cursor() as cur:
         cur.execute("SELECT COUNT(*) AS n FROM `user` WHERE username = %s", (username,))
-        return cur.fetchone()["n"] > 0
+        row = cur.fetchone()
+        return bool(row and row["n"] > 0)
 
 
 def exists_phone(phone):
     """手机号是否已被占用。"""
     with read_cursor() as cur:
         cur.execute("SELECT COUNT(*) AS n FROM `user` WHERE phone = %s", (phone,))
-        return cur.fetchone()["n"] > 0
+        row = cur.fetchone()
+        return bool(row and row["n"] > 0)
 
 
 def create(username, password_hash, real_name, phone, email=None):
@@ -106,4 +108,5 @@ def count(keyword=None):
             )
         else:
             cur.execute("SELECT COUNT(*) AS n FROM `user`")
-        return cur.fetchone()["n"]
+        row = cur.fetchone()
+        return row["n"] if row else 0

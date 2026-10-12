@@ -44,7 +44,8 @@ def count(keyword=None):
                         (f"%{keyword}%", f"%{keyword}%"))
         else:
             cur.execute("SELECT COUNT(*) AS n FROM store")
-        return cur.fetchone()["n"]
+        row = cur.fetchone()
+        return row["n"] if row else 0
 
 
 def create(name, address, phone=None, open_time="08:00:00", close_time="22:00:00"):

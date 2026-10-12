@@ -53,7 +53,8 @@ def is_free(seat_id, reserve_date, start_time, end_time):
             "AND start_time < %s AND end_time > %s",
             (seat_id, reserve_date, end_time, start_time),
         )
-        return cur.fetchone()["n"] == 0
+        row = cur.fetchone()
+        return (row["n"] if row else 0) == 0
 
 
 def create(store_id, seat_no, zone=None, price_per_hour=0):
@@ -106,4 +107,5 @@ def count_by_store(store_id, status=None):
                         (store_id, status))
         else:
             cur.execute("SELECT COUNT(*) AS n FROM seat WHERE store_id = %s", (store_id,))
-        return cur.fetchone()["n"]
+        row = cur.fetchone()
+        return row["n"] if row else 0

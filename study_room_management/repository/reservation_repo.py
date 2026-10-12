@@ -49,7 +49,8 @@ def is_slot_taken(seat_id, reserve_date, start_time):
             "AND active_flag IS NOT NULL",
             (seat_id, reserve_date, start_time),
         )
-        return cur.fetchone()["n"] > 0
+        row = cur.fetchone()
+        return bool(row and row["n"] > 0)
 
 
 def create(order_no, user_id, seat_id, reserve_date, start_time, end_time,
@@ -105,7 +106,8 @@ def list_by_user(user_id, offset=0, limit=20):
 def count_by_user(user_id):
     with read_cursor() as cur:
         cur.execute("SELECT COUNT(*) AS n FROM reservation WHERE user_id = %s", (user_id,))
-        return cur.fetchone()["n"]
+        row = cur.fetchone()
+        return row["n"] if row else 0
 
 
 def list_paged(store_id=None, status=None, offset=0, limit=20):
@@ -141,14 +143,16 @@ def count_paged(store_id=None, status=None):
         sql += " WHERE " + " AND ".join(where)
     with read_cursor() as cur:
         cur.execute(sql, params)
-        return cur.fetchone()["n"]
+        row = cur.fetchone()
+        return row["n"] if row else 0
 
 
 def count_by_status(status):
     """看板用：某状态的预约数。"""
     with read_cursor() as cur:
         cur.execute("SELECT COUNT(*) AS n FROM reservation WHERE status = %s", (status,))
-        return cur.fetchone()["n"]
+        row = cur.fetchone()
+        return row["n"] if row else 0
 
 
 def count_between(start_date, end_date, store_id=None):
@@ -163,4 +167,5 @@ def count_between(start_date, end_date, store_id=None):
         sql += " WHERE r.reserve_date BETWEEN %s AND %s"
     with read_cursor() as cur:
         cur.execute(sql, params)
-        return cur.fetchone()["n"]
+        row = cur.fetchone()
+        return row["n"] if row else 0
