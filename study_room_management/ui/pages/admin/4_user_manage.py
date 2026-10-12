@@ -1,174 +1,126 @@
 """管理端 · 用户管理。
 
-第一行必须调用 ui.components.require_role("admin")。
-功能：用户列表、查看持仓与消费记录、冻结 / 解冻账号。
+功能：用户列表、查看持卡与消费记录、冻结 / 解冻账号。
 """
-from datetime import timedelta
-
-import pandas as pd
 import streamlit as st
 
+from config import MEMBER_LEVEL_NAMES, STATUS_OFF, STATUS_ON
 from services import user_service
 from services.exceptions import BizError
-from ui.components import require_role
+from ui.components import order_status_name, pay_status_name, require_role, sidebar_user
 
 require_role("admin")
+sidebar_user()
 
 st.title("用户管理")
 
+c1, c2 = st.columns([2, 1])
+with c1:
+    keyword = st.text_input("搜索（手机号 / 昵称）")
+with c2:
+    page = st.number_input("页码", min_value=1, value=1, step=1)
 
-def _to_str(v):
-    """pymysql 把 TIME 列返回成 timedelta，Decimal 的 to_string 也走 str。"""
-    if isinstance(v, timedelta):
-        s = int(v.total_seconds())
-        h, m, sec = s // 3600, (s % 3600) // 60, s % 60
-        return f"{h:02d}:{m:02d}:{sec:02d}"
-    return str(v) if v is not None else ""
+rows, total = user_service.list_users_paged(keyword or None, page=page, page_size=10)
+st.caption(f"共 {total} 位用户，第 {page} 页")
 
+if not rows:
+    st.info("没有符合条件的用户。")
+    st.stop()
 
-# ───────────────────────── 用户列表 ─────────────────────────
-st.subheader("用户列表")
-
-col_kw, col_ps = st.columns([3, 1])
-with col_kw:
-    keyword = st.text_input("搜索用户名 / 手机号 / 姓名", key="u_keyword")
-with col_ps:
-    page_size = st.selectbox("每页", [10, 20, 50], key="u_page_size")
-
-page = st.session_state.get("u_page", 1)
-rows, total = user_service.list_users_paged(keyword, page, page_size)
-
-if rows:
-    df = pd.DataFrame(rows).rename(columns={
-        "user_id": "ID",
-        "username": "用户名",
-        "real_name": "姓名",
-        "phone": "手机号",
-        "email": "邮箱",
-        "status": "状态",
-        "created_at": "注册时间",
-    })
-    st.dataframe(df, use_container_width=True, hide_index=True)
-else:
-    st.info("暂无用户")
-
-total_pages = max(1, (total + page_size - 1) // page_size)
-pcol1, pcol2, pcol3 = st.columns([1, 2, 1])
-with pcol1:
-    if st.button("上一页", disabled=(page <= 1), key="u_prev"):
-        st.session_state["u_page"] = page - 1
-        st.rerun()
-with pcol2:
-    st.caption(f"共 {total} 条，第 {page} / {total_pages} 页")
-with pcol3:
-    if st.button("下一页", disabled=(page >= total_pages), key="u_next"):
-        st.session_state["u_page"] = page + 1
-        st.rerun()
+st.dataframe(
+    [{
+        "ID": u["user_id"],
+        "手机号": u["phone"],
+        "昵称": u["nickname"],
+        "余额(元)": float(u["balance"]),
+        "剩余时长(小时)": u["remaining_hours"],
+        "会员等级": MEMBER_LEVEL_NAMES.get(int(u["member_level"]), "普通用户"),
+        "到期时间": u["expire_time"],
+        "注册时间": u["create_time"],
+        "状态": "正常" if int(u["status"]) == STATUS_ON else "已禁用",
+    } for u in rows],
+    width="stretch", hide_index=True,
+)
 
 st.divider()
+umap = {f"{u['user_id']} - {u['nickname']}（{u['phone']}）": u for u in rows}
+picked = st.selectbox("选择用户", list(umap.keys()))
+target = umap[picked]
+user_id = target["user_id"]
 
-# ───────────────────────── 详情与操作 ─────────────────────────
-st.subheader("查看详情 / 冻结账号")
-all_rows, _ = user_service.list_users_paged(None, 1, 1000)
-if not all_rows:
-    st.info("请先有用户")
-else:
-    options = {
-        f"{r['user_id']} · {r['username']}（{r['real_name']}）": r
-        for r in all_rows
-    }
-    pick = st.selectbox("选择用户", list(options.keys()), key="u_pick")
-    user = options[pick]
-    st.write(f"当前状态：**{user['status']}**  注册时间：{user['created_at']}")
-
+st.subheader("账号状态")
+new_status = st.radio(
+    "状态", [STATUS_ON, STATUS_OFF],
+    index=0 if int(target["status"]) == STATUS_ON else 1,
+    format_func=lambda v: "正常" if v == STATUS_ON else "禁用",
+    horizontal=True,
+)
+if st.button("保存账号状态"):
     try:
-        detail = user_service.get_user_detail(user["user_id"])
+        user_service.set_status(user_id, new_status)
+        st.success("已更新")
+        st.rerun()
     except BizError as e:
         st.error(str(e))
-        detail = None
 
-    if detail:
-        # —— 持仓 ——
-        st.markdown("**📎 持仓的卡**")
-        cards = detail["cards"]
-        if cards:
-            cdf = pd.DataFrame(cards).rename(columns={
-                "card_id": "ID",
-                "card_no": "卡号",
-                "user_id": "用户ID",
-                "card_type_id": "卡种ID",
-                "balance": "余额",
-                "remaining_times": "剩余次数",
-                "remaining_hours": "剩余时长(h)",
-                "expire_at": "到期日",
-                "status": "状态",
-            })
-            for col in ("余额", "剩余次数", "剩余时长(h)"):
-                if col in cdf.columns:
-                    cdf[col] = cdf[col].apply(_to_str)
-            st.dataframe(cdf, use_container_width=True, hide_index=True)
-        else:
-            st.caption("该用户没有卡")
+st.divider()
+# 用户身上挂了持卡/预约/充值三张表，取数逻辑收在 user_service.get_user_detail() 里
+detail = user_service.get_user_detail(user_id)
 
-        # —— 最近预约 ——
-        st.markdown("**📋 最近 10 条预约**")
-        ress = detail["reservations"]
-        if ress:
-            rdf = pd.DataFrame(ress).rename(columns={
-                "order_no": "预约单号",
-                "store_name": "门店",
-                "seat_no": "座位号",
-                "reserve_date": "预约日期",
-                "start_time": "开始",
-                "end_time": "结束",
-                "amount": "金额(元)",
-                "status": "状态",
-            })
-            for col in ("开始", "结束"):
-                if col in rdf.columns:
-                    rdf[col] = rdf[col].apply(_to_str)
-            keep = [c for c in ["预约单号", "门店", "座位号", "预约日期",
-                                "开始", "结束", "金额(元)", "状态"] if c in rdf.columns]
-            st.dataframe(rdf[keep], use_container_width=True, hide_index=True)
-        else:
-            st.caption("该用户没有预约记录")
+col1, col2 = st.columns(2)
 
-        # —— 最近充值 ——
-        st.markdown("**💰 最近 10 条充值 / 购卡**")
-        rcs = detail["recharges"]
-        if rcs:
-            rcdf = pd.DataFrame(rcs).rename(columns={
-                "order_no": "充值单号",
-                "card_type_name": "卡种",
-                "amount": "金额(元)",
-                "pay_method": "支付方式",
-                "status": "状态",
-                "created_at": "下单时间",
-            })
-            keep = [c for c in ["充值单号", "卡种", "金额(元)", "支付方式",
-                                "状态", "下单时间"] if c in rcdf.columns]
-            st.dataframe(rcdf[keep], use_container_width=True, hide_index=True)
-        else:
-            st.caption("该用户没有充值记录")
+with col1:
+    st.subheader("持卡情况")
+    cards = detail["cards"]
+    if not cards:
+        st.info("该用户还没有卡。")
+    else:
+        st.dataframe(
+            [{
+                "卡号": c["card_no"],
+                "卡种": c["card_name"],
+                "余额(元)": float(c["balance"]),
+                "剩余次数": c["remaining_times"],
+                "剩余分钟": c["remaining_minutes"],
+                "到期日": c["expire_at"],
+                "状态": "正常" if int(c["status"]) == 1 else "已冻结",
+            } for c in cards],
+            width="stretch", hide_index=True,
+        )
 
-    # —— 冻结 / 解冻 ——
-    st.divider()
-    scol1, scol2 = st.columns(2)
-    with scol1:
-        if st.button("解冻", disabled=(user["status"] == "正常"),
-                     use_container_width=True, key="u_unfreeze"):
-            try:
-                user_service.set_user_status(user["user_id"], "正常")
-                st.success("已解冻")
-                st.rerun()
-            except BizError as e:
-                st.error(str(e))
-    with scol2:
-        if st.button("冻结", disabled=(user["status"] == "冻结"),
-                     use_container_width=True, key="u_freeze"):
-            try:
-                user_service.set_user_status(user["user_id"], "冻结")
-                st.success("已冻结")
-                st.rerun()
-            except BizError as e:
-                st.error(str(e))
+with col2:
+    st.subheader("最近预约记录")
+    orders = detail["orders"]
+    if not orders:
+        st.info("该用户还没有预约记录。")
+    else:
+        st.caption(f"共 {detail['order_total']} 条")
+        st.dataframe(
+            [{
+                "单号": r["order_no"],
+                "日期": r["reserve_date"],
+                "座位": r["seat_code"],
+                "门店": r["store_name"],
+                "扣费": float(r["amount"]),
+                "状态": order_status_name(r["order_status"]),
+            } for r in orders],
+            width="stretch", hide_index=True,
+        )
+
+# 充值记录单独一行放，避免列太挤
+st.subheader("充值记录")
+records = detail["recharges"]
+if not records:
+    st.info("该用户还没有充值记录。")
+else:
+    st.caption(f"共 {detail['recharge_total']} 条")
+    st.dataframe(
+        [{
+            "单号": r["order_no"],
+            "卡种": r["card_name"],
+            "金额(元)": float(r["amount"]),
+            "支付状态": pay_status_name(r["pay_status"]),
+            "支付时间": r["pay_time"],
+        } for r in records],
+        width="stretch", hide_index=True,
+    )
