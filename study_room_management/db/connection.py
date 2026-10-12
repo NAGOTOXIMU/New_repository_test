@@ -1,7 +1,9 @@
-"""数据库连接。每次调用新建一条连接，用完必须 close()。
+"""数据库连接。
 
-注意：跨多张表的写操作请用 db/uow.py 的 uow()。
+一般不用直接调 get_conn()，用下面的 read_cursor() / write_cursor() 即可。
 """
+from contextlib import contextmanager
+
 import pymysql
 
 from config import DB_CONFIG
@@ -13,8 +15,46 @@ def get_conn(autocommit: bool = False):
         **DB_CONFIG,
         autocommit=autocommit,
         cursorclass=pymysql.cursors.DictCursor,
-        connect_timeout=5,      # MySQL 没启动时最多等 5 秒，别让人干等
+        connect_timeout=5,      # MySQL 没启动时最多等 5 秒
     )
+
+
+@contextmanager
+def read_cursor():
+    """只读查询用。自动开关连接：
+
+        with read_cursor() as cur:
+            cur.execute("SELECT ...")
+            rows = cur.fetchall()
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            yield cur
+    finally:
+        conn.close()
+
+
+@contextmanager
+def write_cursor():
+    """写入用。自动开关连接，并负责 COMMIT / ROLLBACK：
+
+        with write_cursor() as cur:
+            cur.execute("INSERT ...")
+            return cur.lastrowid
+
+    注意：跨多张表的写操作不要用它，用 db/uow.py 的 uow()。
+    """
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            yield cur
+        conn.commit()
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
 
 
 def check_connection() -> tuple[bool, str]:
