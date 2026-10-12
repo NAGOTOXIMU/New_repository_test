@@ -2,8 +2,9 @@
 
 用法（在项目根目录 study_room_management 下执行）：
 
-    python -m db.init_db               # 只建库建表（01_schema.sql）
-    python -m db.init_db --with-seed   # 连索引和测试数据一起灌（02、03）
+    python -m db.init_db               # 只建库建表（会先提示确认）
+    python -m db.init_db --yes         # 跳过确认
+    python -m db.init_db --with-seed   # 连索引和测试数据一起灌
 
 为什么用它而不是 mysql 命令行：
     - 复用 .env 里的密码，不用在命令行里再输一遍
@@ -44,12 +45,25 @@ def _run_sql_file(conn, path: Path) -> None:
 
 
 def main() -> int:
-    with_seed = "--with-seed" in sys.argv
+    args = sys.argv[1:]
+    with_seed = "--with-seed" in args
+    assume_yes = "--yes" in args
     db_name = DB_CONFIG["database"]
 
     files = ["01_schema.sql"]
     if with_seed:
         files += ["02_indexes.sql", "03_seed.sql"]
+
+    # 01_schema.sql 是先 DROP 再 CREATE，等于清空整个库，所以默认要人工确认
+    if not assume_yes:
+        print(f"⚠️  这会 DROP 掉 {db_name} 库里的 8 张表再重建，库里的数据会全部丢失。")
+        try:
+            answer = input("确认继续请输入 yes 回车（其他输入都取消）：").strip().lower()
+        except EOFError:
+            answer = ""
+        if answer != "yes":
+            print("已取消，什么都没做。")
+            return 0
 
     # 建库阶段不能带 database 参数，否则连不上还不存在的库
     cfg = dict(DB_CONFIG)
