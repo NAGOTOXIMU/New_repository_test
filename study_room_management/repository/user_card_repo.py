@@ -1,6 +1,6 @@
 """用户持有的卡（user_card）数据访问。余额、次数、时长账户都在这里。
 
-这个文件是整个系统"钱"的出口：充值让它加，预约让它减，退款让它回。
+写函数都支持传事务游标：cur=... 时在事务里执行，不传就自己开连接。
 """
 import uuid
 from datetime import date
@@ -51,7 +51,7 @@ def list_active_by_user(user_id):
 def get_for_update(cur, card_id):
     """在事务里锁定一张卡，防止并发扣到同一张卡上。
 
-    ⚠️ 必须传事务内的游标（不能用 read_cursor），用法在 services 层：
+    ⚠️ 它只接受事务游标（必须由 uow() 提供），用法：
 
         with uow() as cur:
             card = user_card_repo.get_for_update(cur, card_id)
@@ -61,61 +61,95 @@ def get_for_update(cur, card_id):
 
 
 def create(card_no, user_id, card_type_id, balance=0, remaining_times=None,
-           remaining_hours=None, expire_at=None):
+           remaining_hours=None, expire_at=None, cur=None):
     """开一张卡，返回 card_id。"""
-    with write_cursor() as cur:
-        cur.execute(
-            "INSERT INTO user_card (card_no, user_id, card_type_id, balance, "
-            "remaining_times, remaining_hours, expire_at) "
-            "VALUES (%s, %s, %s, %s, %s, %s, %s)",
-            (card_no, user_id, card_type_id, balance, remaining_times,
-             remaining_hours, expire_at),
-        )
+    sql = ("INSERT INTO user_card (card_no, user_id, card_type_id, balance, "
+           "remaining_times, remaining_hours, expire_at) VALUES (%s, %s, %s, %s, %s, %s, %s)")
+    args = (card_no, user_id, card_type_id, balance, remaining_times, remaining_hours, expire_at)
+    if cur is not None:
+        cur.execute(sql, args)
         return cur.lastrowid
+    with write_cursor() as c:
+        c.execute(sql, args)
+        return c.lastrowid
 
 
-def add_balance(card_id, amount):
+def add_balance(card_id, amount, cur=None):
     """加余额（充值到账 / 退款）。返回影响行数。"""
-    with write_cursor() as cur:
-        cur.execute("UPDATE user_card SET balance = balance + %s WHERE card_id = %s",
-                    (amount, card_id))
+    sql = "UPDATE user_card SET balance = balance + %s WHERE card_id = %s"
+    args = (amount, card_id)
+    if cur is not None:
+        cur.execute(sql, args)
         return cur.rowcount
+    with write_cursor() as c:
+        c.execute(sql, args)
+        return c.rowcount
 
 
-def deduct_balance(card_id, amount):
+def deduct_balance(card_id, amount, cur=None):
     """扣余额。返回 1 = 成功，0 = 余额不足。
 
-    防超扣靠 SQL 里的 balance >= %s 条件，而不是"先查再改"——
-    后者在并发下会算错。单条 UPDATE 本身就是原子的。
+    防超扣靠 SQL 里的 balance >= %s，而不是"先查再改"——后者在并发下会算错。
     """
-    with write_cursor() as cur:
-        cur.execute(
-            "UPDATE user_card SET balance = balance - %s WHERE card_id = %s AND balance >= %s",
-            (amount, card_id, amount),
-        )
+    sql = ("UPDATE user_card SET balance = balance - %s "
+           "WHERE card_id = %s AND balance >= %s")
+    args = (amount, card_id, amount)
+    if cur is not None:
+        cur.execute(sql, args)
         return cur.rowcount
+    with write_cursor() as c:
+        c.execute(sql, args)
+        return c.rowcount
 
 
-def deduct_times(card_id, times=1):
+def add_times(card_id, times=1, cur=None):
+    """加次数（退款 / 充值到账）。"""
+    sql = "UPDATE user_card SET remaining_times = remaining_times + %s WHERE card_id = %s"
+    args = (times, card_id)
+    if cur is not None:
+        cur.execute(sql, args)
+        return cur.rowcount
+    with write_cursor() as c:
+        c.execute(sql, args)
+        return c.rowcount
+
+
+def add_hours(card_id, hours, cur=None):
+    """加时长（退款 / 充值到账）。"""
+    sql = "UPDATE user_card SET remaining_hours = remaining_hours + %s WHERE card_id = %s"
+    args = (hours, card_id)
+    if cur is not None:
+        cur.execute(sql, args)
+        return cur.rowcount
+    with write_cursor() as c:
+        c.execute(sql, args)
+        return c.rowcount
+
+
+def deduct_times(card_id, times=1, cur=None):
     """扣次数（次卡用）。返回 1 = 成功，0 = 次数不够。"""
-    with write_cursor() as cur:
-        cur.execute(
-            "UPDATE user_card SET remaining_times = remaining_times - %s "
-            "WHERE card_id = %s AND remaining_times >= %s",
-            (times, card_id, times),
-        )
+    sql = ("UPDATE user_card SET remaining_times = remaining_times - %s "
+           "WHERE card_id = %s AND remaining_times >= %s")
+    args = (times, card_id, times)
+    if cur is not None:
+        cur.execute(sql, args)
         return cur.rowcount
+    with write_cursor() as c:
+        c.execute(sql, args)
+        return c.rowcount
 
 
-def deduct_hours(card_id, hours):
+def deduct_hours(card_id, hours, cur=None):
     """扣时长（时长卡用）。返回 1 = 成功，0 = 时长不够。"""
-    with write_cursor() as cur:
-        cur.execute(
-            "UPDATE user_card SET remaining_hours = remaining_hours - %s "
-            "WHERE card_id = %s AND remaining_hours >= %s",
-            (hours, card_id, hours),
-        )
+    sql = ("UPDATE user_card SET remaining_hours = remaining_hours - %s "
+           "WHERE card_id = %s AND remaining_hours >= %s")
+    args = (hours, card_id, hours)
+    if cur is not None:
+        cur.execute(sql, args)
         return cur.rowcount
+    with write_cursor() as c:
+        c.execute(sql, args)
+        return c.rowcount
 
 
 def update_status(card_id, status):

@@ -53,31 +53,34 @@ def is_slot_taken(seat_id, reserve_date, start_time):
 
 
 def create(order_no, user_id, seat_id, reserve_date, start_time, end_time,
-           hours, amount, card_id=None):
+           hours, amount, card_id=None, cur=None):
     """写入一条预约，返回 reservation_id。
 
-    ⚠️ 如果这个座位该时段已被占用，会抛 pymysql.err.IntegrityError
-       （唯一索引 uk_seat_slot 拦下的），调用方要捕获它。
+    ⚠️ 这个座位该时段若已被占用，会抛 pymysql.err.IntegrityError（唯一索引拦下）。
     """
-    with write_cursor() as cur:
-        cur.execute(
-            "INSERT INTO reservation (order_no, user_id, seat_id, card_id, reserve_date, "
-            "start_time, end_time, hours, amount) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)",
-            (order_no, user_id, seat_id, card_id, reserve_date,
-             start_time, end_time, hours, amount),
-        )
+    sql = ("INSERT INTO reservation (order_no, user_id, seat_id, card_id, reserve_date, "
+           "start_time, end_time, hours, amount) VALUES (%s, %s, %s, %s, %s, %s, %s, %s, %s)")
+    args = (order_no, user_id, seat_id, card_id, reserve_date,
+            start_time, end_time, hours, amount)
+    if cur is not None:
+        cur.execute(sql, args)
         return cur.lastrowid
+    with write_cursor() as c:
+        c.execute(sql, args)
+        return c.lastrowid
 
 
-def cancel(reservation_id):
+def cancel(reservation_id, cur=None):
     """取消预约：状态改成已取消，并把 active_flag 置 NULL 释放时段。"""
-    with write_cursor() as cur:
-        cur.execute(
-            "UPDATE reservation SET status = '已取消', active_flag = NULL "
-            "WHERE reservation_id = %s AND status IN ('待使用', '使用中')",
-            (reservation_id,),
-        )
+    sql = ("UPDATE reservation SET status = '已取消', active_flag = NULL "
+           "WHERE reservation_id = %s AND status IN ('待使用', '使用中')")
+    args = (reservation_id,)
+    if cur is not None:
+        cur.execute(sql, args)
         return cur.rowcount
+    with write_cursor() as c:
+        c.execute(sql, args)
+        return c.rowcount
 
 
 def update_status(reservation_id, status):

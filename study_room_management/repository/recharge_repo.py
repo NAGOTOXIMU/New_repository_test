@@ -31,14 +31,14 @@ def get_by_id(recharge_id):
 
 
 def get_by_order_no(order_no):
-    """幂等校验用：下单前先看这个单号是不是已经存在。"""
+    """按单号查（幂等校验用）。"""
     with read_cursor() as cur:
         cur.execute(f"SELECT {_FIELDS} FROM recharge WHERE order_no = %s", (order_no,))
         return cur.fetchone()
 
 
 def create(order_no, user_id, card_type_id, amount, pay_method="微信"):
-    """创建订单（状态默认"待支付"），返回 recharge_id。"""
+    """创建订单（状态默认"待支付"），返回 recharge_id。order_no 撞了会抛 IntegrityError。"""
     with write_cursor() as cur:
         cur.execute(
             "INSERT INTO recharge (order_no, user_id, card_type_id, amount, pay_method) "
@@ -48,18 +48,20 @@ def create(order_no, user_id, card_type_id, amount, pay_method="微信"):
         return cur.lastrowid
 
 
-def mark_paid(recharge_id, card_id=None):
-    """标记为已支付并记下生成的卡。返回 1 = 成功，0 = 这单已经不是待支付了。
+def mark_paid(recharge_id, card_id=None, cur=None):
+    """标记为已支付并记下生成的卡。返回 1 = 成功，0 = 这单已不是待支付。
 
     靠 WHERE status = '待支付' 保证不会重复支付同一单。
     """
-    with write_cursor() as cur:
-        cur.execute(
-            "UPDATE recharge SET status = '已支付', paid_at = NOW(), card_id = %s "
-            "WHERE recharge_id = %s AND status = '待支付'",
-            (card_id, recharge_id),
-        )
+    sql = ("UPDATE recharge SET status = '已支付', paid_at = NOW(), card_id = %s "
+           "WHERE recharge_id = %s AND status = '待支付'")
+    args = (card_id, recharge_id)
+    if cur is not None:
+        cur.execute(sql, args)
         return cur.rowcount
+    with write_cursor() as c:
+        c.execute(sql, args)
+        return c.rowcount
 
 
 def cancel(recharge_id):
