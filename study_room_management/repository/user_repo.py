@@ -110,3 +110,15 @@ def count(keyword=None):
             cur.execute("SELECT COUNT(*) AS n FROM `user`")
         row = cur.fetchone()
         return row["n"] if row else 0
+
+
+def count_new_by_day(days=30):
+    """按天统计新增用户（看会员增长）。"""
+    with read_cursor() as cur:
+        cur.execute(
+            "SELECT DATE(created_at) AS day, COUNT(*) AS n FROM `user` "
+            "WHERE created_at >= CURDATE() - INTERVAL %s DAY "
+            "GROUP BY DATE(created_at) ORDER BY day",
+            (days,),
+        )
+        return cur.fetchall()

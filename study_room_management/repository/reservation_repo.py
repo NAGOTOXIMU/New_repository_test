@@ -169,3 +169,19 @@ def count_between(start_date, end_date, store_id=None):
         cur.execute(sql, params)
         row = cur.fetchone()
         return row["n"] if row else 0
+
+
+def count_by_hour(store_id=None, days=30):
+    """按开始时间的小时统计预约量（看热门时段）。"""
+    sql = ("SELECT HOUR(r.start_time) AS hour, COUNT(*) AS n "
+           "FROM reservation r JOIN seat s ON r.seat_id = s.seat_id "
+           "WHERE r.reserve_date >= CURDATE() - INTERVAL %s DAY "
+           "AND r.status <> '已取消'")
+    params = [days]
+    if store_id:
+        sql += " AND s.store_id = %s"
+        params.append(store_id)
+    sql += " GROUP BY HOUR(r.start_time) ORDER BY hour"
+    with read_cursor() as cur:
+        cur.execute(sql, params)
+        return cur.fetchall()
