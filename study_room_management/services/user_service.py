@@ -1,4 +1,6 @@
 """用户业务：注册、登录。本文件不写 SQL，只做校验和调用 repository。"""
+import pymysql
+
 from repository import user_repo
 from services.exceptions import BizError
 from services.password import hash_password, verify_password
@@ -18,8 +20,20 @@ def register(username, password, real_name, phone, email=None):
     if user_repo.exists_phone(phone):
         raise BizError("这个手机号已经被注册了")
 
-    user_id = user_repo.create(username, hash_password(password), real_name, phone, email)
-    return {"user_id": user_id, "username": username, "real_name": real_name}
+    try:
+        user_id = user_repo.create(
+            username, hash_password(password), real_name, phone, email
+        )
+    except pymysql.err.IntegrityError:
+        # 并发下两个请求同时通过查重时会撞唯一索引，这里兜一句人话
+        raise BizError("这个用户名或手机号已经被注册了")
+
+    return {
+        "user_id": user_id,
+        "username": username,
+        "real_name": real_name,
+        "role": "user",
+    }
 
 
 def login(username, password):
@@ -34,5 +48,6 @@ def login(username, password):
     if user["status"] != "正常":
         raise BizError("账号已被冻结，请联系管理员")
 
-    user.pop("password")     # 哈希值不能传到界面层
+    user.pop("password")        # 哈希值不能传到界面层
+    user["role"] = "user"       # 管理员登录走 admin_service，那里写 "admin"
     return user

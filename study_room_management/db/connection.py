@@ -13,6 +13,7 @@ def get_conn(autocommit: bool = False):
         **DB_CONFIG,
         autocommit=autocommit,
         cursorclass=pymysql.cursors.DictCursor,
+        connect_timeout=5,      # MySQL 没启动时最多等 5 秒，别让人干等
     )
 
 

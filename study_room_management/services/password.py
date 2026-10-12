@@ -22,11 +22,13 @@ def hash_password(password: str) -> str:
 
 def verify_password(password: str, stored: str) -> bool:
     """校验明文密码是否与库里的 "盐$哈希" 匹配。"""
+    if not isinstance(stored, str) or "$" not in stored:
+        return False
+    salt_b64, dk_b64 = stored.split("$", 1)
     try:
-        salt_b64, dk_b64 = stored.split("$", 1)
         salt = base64.b64decode(salt_b64)
         expected = base64.b64decode(dk_b64)
-    except Exception:
+    except Exception:      # 库里存的值格式坏了，按校验失败处理
         return False
     dk = hashlib.pbkdf2_hmac("sha256", password.encode(), salt, _ITERATIONS)
     return hmac.compare_digest(dk, expected)
