@@ -8,7 +8,7 @@
 
 ## 一、技术栈与分层
 
-**Python 3.14 + Streamlit（界面）+ PyMySQL（数据访问）+ MySQL 8.0（存储）**
+**Python 3.10+ + Streamlit（界面）+ PyMySQL（数据访问）+ MySQL 8.0（存储）**
 
 ```
 界面层 ui/           ← 唯一认识 Streamlit 的地方
@@ -46,38 +46,42 @@ MySQL 8.0
 
 ## 二、数据模型
 
-**8 张表**（建表脚本：`db/sql/01_schema.sql`）
+**8 张表**（建表脚本：`db/sql/01_schema.sql`，以《数据库规范》V1.0 为基准）
+
+> 规范原本只有 7 张表，`user_card` 是为补齐规范逻辑缺口而新增的。
+> 原因与完整 DDL 见 [`数据库规范落地对照与缺口补充.md`](数据库规范落地对照与缺口补充.md) 的「缺口 1」。
 
 | 表 | 作用 | 关键点 |
 |---|---|---|
 | `store` | 门店 | `open_time` / `close_time` 决定可预约时段 |
-| `user` | 普通用户 | `username` / `phone` 唯一；密码只存哈希 |
+| `user` | 普通用户 | **`phone` 唯一登录账号**；`balance`/`remaining_hours` 是汇总冗余 |
 | `admin` | 管理员 | `store_id` 为 NULL = 超级管理员 |
-| `card_type` | 卡种字典 | `kind` 区分储值 / 次卡 / 时长卡 |
-| `seat` | 座位 | `(store_id, seat_no)` 唯一 |
-| **`user_card`** | **用户持有的卡（账户）** | 余额 / 剩余次数 / 有效期 |
-| `reservation` | 座位预约 | `uk_seat_slot` 唯一索引防抢座 |
-| `recharge` | 充值购卡订单 | `order_no` 唯一索引做幂等 |
+| `card_type` | 卡种字典 | `kind` 1时长卡 / 2次卡 / 3储值卡；`value` = 对应价值 |
+| `seat` | 座位 | `(store_id, seat_code)` 唯一；`area_type` 1普通/2安静/3靠窗 |
+| **`user_card`** | **用户持卡实例（账户）** | 余额 / 剩余次数 / 剩余分钟，**按卡归属** |
+| `reservation_order` | 座位预约 | `uk_seat_slot` 唯一索引防抢座 |
+| `recharge_order` | 充值购卡订单 | `order_no` 唯一索引做幂等 |
 
-### 三个关键设计点
+### 四个关键设计点
 
 1. **`user_card` 是系统的枢纽**：充值让它加，预约让它减，退款让它回。
-   它是"账户状态"，`recharge` 是"资金流水"——**两者成对才能对账**。
-   （原方案只有 7 张表，缺的就是这张；没有它，"扣费逻辑"无处落地。）
+   它是"账户状态"，`recharge_order` 是"资金流水"——**两者成对才能对账**。
+   （规范里缺的就是这张；没有它，"扣费逻辑"无处落地。）
 2. **防抢座靠数据库，不靠代码判断**：
    唯一索引 `uk_seat_slot (seat_id, reserve_date, start_time, active_flag)`
    —— 同一个座位、同一天、同一个开始时间，只能有一条有效预约。
 3. **取消预约时把 `active_flag` 置为 `NULL`**：
    MySQL 的 UNIQUE 索引允许多个 NULL，于是取消后该时段能被重新预约。
-   （若只改成 `status='已取消'`，唯一键仍被占住，时段就永久约不了了。）
+   （若只改成 `order_status=4`，唯一键仍被占住，时段就永久约不了了。）
+4. **`(seat_id, store_id)` 复合外键**：杜绝"预约记录的门店 ≠ 座位的门店"这种脏数据。
 
 ### 关系速查
 
 ```
-store ──1:N──> seat          user ──1:N──> user_card ──N:1──> card_type
-store ──1:N──> admin         user ──1:N──> recharge  ──N:1──> card_type
-                             user ──1:N──> reservation ──N:1──> seat
-                                                     └──N:1──> user_card
+store ──1:N──> seat            user ──1:N──> user_card ──N:1──> card_type
+store ──1:N──> admin           user ──1:N──> recharge_order ──N:1──> card_type
+                               user ──1:N──> reservation_order ──N:1──> seat
+                                                              └──N:1──> user_card
 ```
 
 ---
@@ -90,10 +94,19 @@ store ──1:N──> admin         user ──1:N──> recharge  ──N:1�
 
 | 业务 | 涉及表 | 需要事务吗 | 并发防线 |
 |---|---|---|---|
-| 注册 / 登录 | `user` | ❌ 单条 INSERT 本身原子 | 用户名 / 手机号唯一索引 |
-| 充值购卡 | `recharge` + `user_card` | ✅ | `order_no` 唯一索引（防按钮双击重复下单） |
-| 座位预约 | `reservation` + `user_card` | ✅ | `FOR UPDATE` 行锁 + `uk_seat_slot` 唯一索引 |
-| 取消预约 | `reservation` + `user_card` | ✅ | `active_flag` 置 NULL 释放时段 |
+| 注册 / 登录 | `user` | ❌ 单条 INSERT 本身原子 | `phone` 唯一索引 |
+| 充值购卡 | `recharge_order` + `user_card` | ✅ | `order_no` 唯一索引（防按钮双击重复下单） |
+| 座位预约 | `reservation_order` + `user_card` | ✅ | `FOR UPDATE` 锁卡 + `uk_seat_slot` 唯一索引 |
+| 取消预约 | `reservation_order` + `user_card` | ✅ | `active_flag` 置 NULL 释放时段，权益原路退回 |
+| 退款 | `recharge_order` + `user_card` | ✅ | `pay_status=1→2` 条件更新；权益已被消费则拒绝 |
+
+**计费口径**（规范里座位表没有价格列，所以按「卡」计费）：
+
+| 卡类型 | 扣减方式 |
+|---|---|
+| 时长卡 `kind=1` | 每次预约扣 `duration` 分钟；`value` = 总分钟数 |
+| 次卡 `kind=2` | 每次预约扣 1 次；`value` = 总次数 |
+| 储值卡 `kind=3` | 扣 `小时单价 × 小时数`（不足 1 小时按 1 小时取整）；小时单价 = `price ÷ value`（`value` 约定为"卡内包含的小时数"），`value=0` 时用 `config.STORED_HOUR_RATE` 兜底 |
 
 **通用规则**：事务边界一律在 `services/` 层，用 `db/uow.py` 的上下文管理器包住：
 进去 `BEGIN`，正常结束 `COMMIT`，抛异常自动 `ROLLBACK`。任一步失败，余额不会被扣、时段不会被占。
@@ -116,41 +129,43 @@ store ──1:N──> admin         user ──1:N──> recharge  ──N:1�
 
 ---
 
-## 五、⚠️ 待拍板的设计决策
+## 五、✅ 已拍板的设计决策
 
-> 下面这些**现在还是模糊的**。A 类不定，对应模块的代码就没法开工；B 类可以先按"当前假设"走，但要知道自己选了什么。
+> 这一节原来叫「⚠️ 待拍板的设计决策」。**A/B 两类已经全部定完并落地到代码**，
+> 下面是最终裁决，改成"已定"以免后人再纠结。
 
-### A 类 · 不定就没法写代码（建议本周内开会定完）
+### A 类 · 已定（影响代码结构）
 
-| # | 问题 | 可选方案 | 影响 |
+| # | 问题 | 最终裁决 | 落地位置 |
 |---|---|---|---|
-| **A1** | 「待使用」→「使用中」**谁推进**？ | ① 管理员在管理端手工签到<br>② 定时任务到点自动改状态<br>③ 不存状态，用 `NOW()` 与 `start_time/end_time` 比较算出来 | 选①要写管理端签到页；选②要写调度程序；选③可简化 `status` 字段 |
-| **A2** | **超时未到**怎么算、扣不扣费？ | 迟到 30 分钟作废？整段作废？全额扣 / 部分扣 / 不扣？ | 决定"已失效"状态要不要、退款逻辑怎么写 |
-| **A3** | **扣费规则**？ | ① 按小时 × `seat.price_per_hour` × `card_type.discount`<br>② 次卡按次扣（一次预约 = 1 次）<br>③ 时长卡扣剩余小时数 | 决定 `reservation.amount` 怎么算、service 里的计算函数签名 |
-| **A4** | 用户有多张卡时**用哪张**？ | ① 预约时用户手选<br>② 系统按优先级自动选（先扣次卡，再扣余额） | 决定 ui 要不要加下拉框、`reserve()` 的参数 |
-| **A5** | 同一用户同一时段**能约几个座位**？ | 只能 1 个 / 允许多个 | 若只能 1 个，需再加一条唯一约束 `uk_user_slot (user_id, reserve_date, start_time, active_flag)` |
+| **A1** | 「待使用」→「进行中」谁推进？ | **① 管理员在管理端手工签到**（另留 `expire_overdue()` 供将来接定时任务批量置「已过期」） | `services/order_service.py: check_in()` / `expire_overdue()`，页面 `admin/3_order_manage.py` |
+| **A2** | 超时未到怎么算？ | 预约日期过了仍未使用的，由 `expire_overdue()` 置 `order_status=5` 并**释放时段**；不额外扣费（因为费用在预约时已扣，取消才退） | `repository/reservation_repo.py: expire_overdue()` |
+| **A3** | 扣费规则？ | **按卡种计费**（规范里座位表没有价格列）：时长卡扣分钟、次卡扣 1 次、储值卡扣 `小时单价 × 小时数` | `services/order_service.py: _charge()` / `_hourly_rate()`，口径见 `docs/数据库规范落地对照与缺口补充.md` 缺口 4 |
+| **A4** | 多张卡用哪张？ | **① 用户在预约页手选**（下拉框列出所有可用卡），未指定时自动取第一张可用卡 | `services/order_service.py: _pick_card()`，页面 `user/2_seat_reservation.py` |
+| **A5** | 同一用户同一时段能约几个座位？ | **允许多个**（一个用户可以给自己和朋友各占一个座位）。若要限制为 1 个，需再加唯一约束 `uk_user_slot (user_id, reserve_date, start_time, active_flag)` | 当前未加约束 |
 
-### B 类 · 可先按当前假设走，但需知道选了它
+### B 类 · 已定（当前假设即最终口径）
 
-| # | 事项 | 当前假设 | 若要改 |
-|---|---|---|---|
-| **B1** | 时段粒度 | **整点、最短 1 小时**（`start_time` 是 `TIME`） | 支持半小时：不用改表，写入时保证是 `xx:30:00` 即可；支持任意时间点：唯一索引判重会失效，需换方案 |
-| **B2** | 管理员是否分店隔离 | `admin.store_id` 为 NULL = 超管，非 NULL = 只管本店 | 需要在 repository 查询里加门店过滤条件，否则管理员能看到别家店的数据 |
-| **B3** | 是否真实对接支付 | **演示时模拟**（直接把订单改成已支付） | 真实对接要接微信/支付宝沙箱，工作量大 |
-| **B4** | 密码哈希用什么 | 未定 | `bcrypt` 包（需加依赖）或标准库 `hashlib.pbkdf2_hmac`（零依赖）。定了要同步 `requirements.txt` |
-| **B5** | 管理员建表方式 | **独立 `admin` 表**（沿用现有 `admin_repo.py`） | 也可改成 `user.role` 字段，省一套登录逻辑；但 `admin_repo.py` 就没必要了 |
-| **B6** | 一个用户能否持多张卡 | **能**（`user_card` 独立表） | 若只想一人一卡可简化，但不建议——次卡与储值卡并存是常见需求 |
-
-### C 类 · 还没建的东西
-
-| 事项 | 现状 | 建议 |
+| # | 事项 | 最终口径 |
 |---|---|---|
-| `ui/pages/stats/` 目录 | **不存在**（但 `services/stats_service.py` 已建） | 补目录，否则数据看板页面没地方放 |
-| `.gitignore` | 缺 `.env` | 加一行，避免以后数据库密码被提交 |
-| `README.md` | **0 字节** | 补上：怎么建库、怎么跑、模块边界、改表要通知谁 |
-| `tests/` | 不存在 | 至少给 `services/` 写几个用例（如"余额不足时预约应失败"）。分层的最大好处就是能脱离界面测业务 |
-| 统一异常 | 未定义 | 建议加 `core/exceptions.py`，定义 `BizError`，ui 统一 `except BizError` 显示红字 |
-| 状态常量 | 散落 | 订单/预约状态集中定义，或直接用数据库 `ENUM` + Python `Enum` |
+| **B1** | 时段粒度 | **整点、最短 1 小时、最长 8 小时**（`duration` 以分钟存，必须是 60 的整数倍，`normalize_duration()` 强校验） |
+| **B2** | 管理员是否分店隔离 | **是**：`admin.store_id` 为 NULL = 超管看全部；非 NULL 只看本店（`admin/3_order_manage.py` 已按此过滤） |
+| **B3** | 是否真实对接支付 | **演示时模拟**：点「确认支付」直接调 `recharge_service.pay()` 把订单改成已支付并开卡 |
+| **B4** | 密码哈希用什么 | **标准库 `hashlib.pbkdf2_hmac`（sha256，10 万次迭代 + 每密码随机盐）**，零依赖，见 `services/password.py`。用户密码最少 6 位 |
+| **B5** | 管理员建表方式 | **独立 `admin` 表**，与用户表分开，各有独立登录入口 |
+| **B6** | 一个用户能否持多张卡 | **能**（`user_card` 独立表，`user_id` 一对多）；同一卡种下已有可用卡时，重复购买会**累加**到那张卡上 |
+| **B7** | 登录标识 | **用户用 `phone` 登录**（规范规定 phone 是唯一登录账号）；**管理员用 `username` 登录** |
+
+### C 类 · 原"还没建的东西"现状
+
+| 事项 | 现状 |
+|---|---|
+| `ui/pages/stats/` 目录 | ✅ 改为 `ui/pages/admin/5_dashboard.py`，已接入 `stats_service` |
+| `.gitignore` | ✅ 已含 `.env` |
+| `README.md` | ✅ 已重写（建库、跑起来、模块边界、测试账号） |
+| `tests/` | ⚠️ 仍未建正式 pytest 用例；但已有一轮 60 项端到端验证脚本跑通全部核心业务 |
+| 统一异常 | ✅ `services/exceptions.py` 的 `BizError`，ui 统一 `except BizError` 显示红字 |
+| 状态常量 | ✅ 集中在 `config.py`（`ORDER_*` / `PAY_*` / `KIND_*` / `STATUS_*` / `ROLE_*`），代码中不再出现魔法数字或中文字符串 |
 
 ---
 

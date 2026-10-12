@@ -1,29 +1,69 @@
 """预约业务：下单、取消、状态流转。
 
 本文件不写 SQL；涉及钱的操作全部走 db/uow.py 的事务。
+
+计费口径（规范里座位表没有价格列，所以按「卡」计费）：
+    kind=1 时长卡 → 扣 duration 分钟（不足 1 分钟按 1 分钟）
+    kind=2 次卡   → 每次预约扣 1 次
+    kind=3 储值卡 → 按小时单价 × 时长，向上取整到整小时
+                    小时单价 = card_type.price ÷ (card_type.value/60)，
+                    即「售价 ÷ 卡原价小时数」，例如 100 元储值卡 value=0 时
+                    退回该卡种售价；规范未给储值单价时的兜底规则见下方 _hourly_rate。
 """
-from datetime import datetime, timedelta
+from datetime import date, datetime
 
 import pymysql
 
+from config import (KIND_HOURS, KIND_STORED, KIND_TIMES, MAX_RESERVE_MINUTES,
+                    ORDER_DONE, ORDER_ONGOING, ORDER_PENDING,
+                    RESERVE_STEP_MINUTES, STORED_HOUR_RATE)
 from db.uow import uow
-from repository import card_type_repo, reservation_repo, seat_repo, user_card_repo
+from repository import (card_type_repo, reservation_repo, seat_repo, user_card_repo,
+                        user_repo)
 from services.exceptions import BizError
 
-MAX_HOURS = 8      # 一次最多连选几小时
+
+# ---------------------------------------------------------------------------
+# 时间工具：库里 start_time/end_time 是 TIME，duration 是分钟
+# ---------------------------------------------------------------------------
+def to_minutes(hhmmss) -> int:
+    """'14:00:00' -> 840（分钟）。"""
+    t = datetime.strptime(str(hhmmss)[:8], "%H:%M:%S")
+    return t.hour * 60 + t.minute
 
 
-def _end_time(start_time, hours):
-    """'14:00:00' 加 2 小时 -> '16:00:00'。"""
-    t = datetime.strptime(str(start_time), "%H:%M:%S")
-    return (t + timedelta(hours=hours)).strftime("%H:%M:%S")
+def to_time_str(minutes: int) -> str:
+    """840 -> '14:00:00'。超过 24 点按当天最大 23:59 截断。"""
+    minutes = min(int(minutes), 23 * 60 + 59)
+    return f"{minutes // 60:02d}:{minutes % 60:02d}:00"
 
 
+def make_end_time(start_time, duration_minutes: int) -> str:
+    """开始时间 + 时长 -> 结束时间字符串。"""
+    return to_time_str(to_minutes(start_time) + int(duration_minutes))
+
+
+def normalize_duration(duration) -> int:
+    """校验并规整时长（分钟）：必须是整小时、在 1~8 小时之间。"""
+    try:
+        duration = int(duration)
+    except (TypeError, ValueError):
+        raise BizError("时长必须是整数分钟")
+    if duration < 60 or duration > MAX_RESERVE_MINUTES:
+        raise BizError(f"一次可预约 1~{MAX_RESERVE_MINUTES // 60} 小时")
+    if duration % RESERVE_STEP_MINUTES != 0:
+        raise BizError("时长必须是整小时")
+    return duration
+
+
+# ---------------------------------------------------------------------------
+# 选卡与计费
+# ---------------------------------------------------------------------------
 def _pick_card(user_id, card_id=None):
     """选卡：传了 card_id 就用它，没传就自动取第一张可用的。"""
     cards = user_card_repo.list_active_by_user(user_id)
     if not cards:
-        raise BizError("你还没有可用的会员卡，请先充值")
+        raise BizError("你还没有可用的会员卡，请先购卡充值")
     if card_id is None:
         return cards[0]
     for c in cards:
@@ -32,70 +72,120 @@ def _pick_card(user_id, card_id=None):
     raise BizError("这张卡当前不可用（可能已过期或被冻结）")
 
 
-def _charge(cur, card, hours, price_per_hour):
+def _hourly_rate(ct) -> float:
+    """储值卡的小时单价（元/小时）。
+
+    规范里 card_type 没有「储值卡单价」列，所以约定：
+      1) value > 0 → 把 value 当作「这张卡包含的小时数」，单价 = price ÷ value
+         （例：100 元的储值卡 value=20，就是 5 元/小时）
+      2) value = 0 → 用 config.STORED_HOUR_RATE 兜底
+    管理员要调价，在卡种管理里把 value 填成小时数即可，不用改代码。
+    """
+    value = int(ct.get("value") or 0)
+    if value > 0:
+        return round(float(ct["price"]) / value, 2)
+    return float(STORED_HOUR_RATE)
+
+
+def estimate_amount(card, duration_minutes):
+    """预估这次预约要花多少钱（储值卡才有金额，其余返回 0）。"""
+    if not card:
+        return 0.0
+    ct = card_type_repo.get_by_id(card["card_type_id"])
+    if ct is None or int(ct["kind"]) != KIND_STORED:
+        return 0.0
+    hours = max(1, -(-int(duration_minutes) // 60))     # 向上取整到整小时
+    return round(_hourly_rate(ct) * hours, 2)
+
+
+def _charge(cur, card, duration_minutes):
     """按卡种扣费，返回本次实际扣掉的钱。不够用就抛 BizError。
 
-    规则（见 docs/DESIGN.md 的 A3，可改）：
-        次卡   -> 扣 1 次
-        时长卡 -> 扣 hours 小时
-        储值卡 -> 座位原价 × 小时数 × 卡的折扣率
+    扣减全部走「带条件的原子 UPDATE」，并发下不会扣穿。
     """
     ct = card_type_repo.get_by_id(card["card_type_id"])
-    kind = ct["kind"] if ct else "储值"
+    if ct is None:
+        raise BizError("卡种已不存在，请联系管理员")
+    kind = int(ct["kind"])
+    card_id = card["card_id"]
+    duration_minutes = max(1, int(duration_minutes))
 
-    if kind == "次卡":
-        if not user_card_repo.deduct_times(card["card_id"], 1, cur=cur):
+    if kind == KIND_TIMES:
+        if not user_card_repo.deduct_times(card_id, 1, cur=cur):
             raise BizError("次卡剩余次数不足")
         return 0.0
-    if kind == "时长卡":
-        if not user_card_repo.deduct_hours(card["card_id"], hours, cur=cur):
+
+    if kind == KIND_HOURS:
+        if not user_card_repo.deduct_minutes(card_id, duration_minutes, cur=cur):
             raise BizError("时长卡剩余时长不足")
         return 0.0
 
-    amount = round(float(price_per_hour) * hours * float(ct["discount"]), 2)
-    if not user_card_repo.deduct_balance(card["card_id"], amount, cur=cur):
-        raise BizError("卡内余额不足")
+    # 储值卡
+    hours = max(1, -(-duration_minutes // 60))
+    amount = round(_hourly_rate(ct) * hours, 2)
+    if amount > 0 and not user_card_repo.deduct_balance(card_id, amount, cur=cur):
+        raise BizError(f"卡内余额不足，本次需要 {amount:.2f} 元")
     return amount
 
 
-def _refund(cur, card_id, amount, hours):
-    """取消预约时把钱按原路退回去。"""
+def _refund(cur, card_id, amount, duration_minutes, user_id):
+    """取消预约时把权益按原路退回。"""
     if not card_id:
         return
-    card = user_card_repo.get_by_id(card_id)
+    card = user_card_repo.get_for_update(cur, card_id)
     if card is None:
         return
     ct = card_type_repo.get_by_id(card["card_type_id"])
-    kind = ct["kind"] if ct else "储值"
-    if kind == "次卡":
+    if ct is None:
+        return
+    kind = int(ct["kind"])
+
+    if kind == KIND_TIMES:
         user_card_repo.add_times(card_id, 1, cur=cur)
-    elif kind == "时长卡":
-        user_card_repo.add_hours(card_id, hours, cur=cur)
-    else:
-        user_card_repo.add_balance(card_id, amount, cur=cur)
+    elif kind == KIND_HOURS:
+        user_card_repo.add_minutes(card_id, max(1, int(duration_minutes)), cur=cur)
+    elif float(amount) > 0:
+        user_card_repo.add_balance(card_id, float(amount), cur=cur)
+
+    # 卡内资产变了，同步 user 表的汇总冗余字段
+    user_repo.refresh_summary(cur, user_id)
 
 
-def reserve(user_id, seat_id, reserve_date, start_time, hours=1, card_id=None):
+# ---------------------------------------------------------------------------
+# 对外业务
+# ---------------------------------------------------------------------------
+def reserve(user_id, seat_id, reserve_date, start_time, duration, card_id=None,
+            store_id=None):
     """预约座位。成功返回 dict，失败抛 BizError。
 
     两道并发防线：
-        1) 扣费靠 SQL 的 balance >= x 条件（原子，见 user_card_repo）
-        2) 占座位靠唯一索引 uk_seat_slot——插不进去就说明被人抢了
+        1) 扣费靠 SQL 的 balance >= x / remaining_* >= x 条件（原子，见 user_card_repo）
+        2) 占座位靠唯一索引 uk_seat_slot —— 插不进去就说明被人抢了
     """
-    hours = int(hours)
-    if not 1 <= hours <= MAX_HOURS:
-        raise BizError(f"一次最多预约 {MAX_HOURS} 小时")
+    duration = normalize_duration(duration)
 
     seat = seat_repo.get_by_id(seat_id)
     if seat is None:
         raise BizError("座位不存在")
-    if seat["status"] != "可用":
+    if int(seat["status"]) != 1:
         raise BizError("这个座位当前不可预约")
 
+    # 门店以座位实际所属门店为准，杜绝前端传错
+    real_store_id = int(seat["store_id"])
+    if store_id is not None and int(store_id) != real_store_id:
+        raise BizError("座位与门店不匹配，请重新选择")
+
+    try:
+        reserve_date = datetime.strptime(str(reserve_date), "%Y-%m-%d").date()
+    except ValueError:
+        raise BizError("预约日期格式不正确")
+    if reserve_date < date.today():
+        raise BizError("不能预约过去的日期")
+
     start_time = str(start_time)
-    end_time = _end_time(start_time, hours)
-    if end_time <= start_time:
-        raise BizError("结束时间必须晚于开始时间")
+    end_time = make_end_time(start_time, duration)
+    if to_minutes(end_time) <= to_minutes(start_time):
+        raise BizError("结束时间必须晚于开始时间，且不能跨天")
 
     card = _pick_card(user_id, card_id)
     order_no = reservation_repo.generate_order_no()
@@ -104,70 +194,90 @@ def reserve(user_id, seat_id, reserve_date, start_time, hours=1, card_id=None):
         with uow() as cur:
             # 锁住这张卡，防止并发扣同一张
             locked = user_card_repo.get_for_update(cur, card["card_id"])
-            if locked is None or locked["status"] != "正常":
+            if locked is None or int(locked["status"]) != 1:
                 raise BizError("这张卡当前不可用")
+            if locked["expire_at"] is not None and locked["expire_at"] < date.today():
+                raise BizError("这张卡已过期")
 
-            amount = _charge(cur, locked, hours, seat["price_per_hour"])
+            amount = _charge(cur, locked, duration)
 
-            reservation_id = reservation_repo.create(
-                order_no, user_id, seat_id, reserve_date, start_time, end_time,
-                hours, amount, card["card_id"], cur=cur,
+            order_id = reservation_repo.create(
+                order_no, user_id, seat_id, real_store_id, reserve_date,
+                start_time, end_time, duration, amount,
+                card_id=card["card_id"], cur=cur,
             )
-    except pymysql.err.IntegrityError:
-        raise BizError("这个时段刚刚被别人约走了，请换一个")
+
+            # 扣完卡内资产，同步 user 表汇总
+            user_repo.refresh_summary(cur, user_id)
+    except pymysql.err.IntegrityError as e:
+        # uk_seat_slot 撞了 = 这个时段刚被别人约走
+        if "uk_seat_slot" in str(e):
+            raise BizError("这个时段刚刚被别人约走了，请换一个")
+        raise BizError("下单失败，请重试")
 
     return {
-        "reservation_id": reservation_id,
+        "order_id": order_id,
         "order_no": order_no,
-        "seat_no": seat["seat_no"],
+        "seat_id": seat_id,
+        "seat_code": seat["seat_code"],
+        "store_id": real_store_id,
         "reserve_date": str(reserve_date),
         "start_time": start_time,
         "end_time": end_time,
-        "amount": amount,
+        "duration": duration,
+        "amount": float(amount),
+        "card_id": card["card_id"],
     }
 
 
-def cancel(reservation_id, user_id):
-    """取消预约：释放时段 + 退款。两边在同一个事务里。"""
-    res = reservation_repo.get_by_id(reservation_id)
+def cancel(order_id, user_id):
+    """取消预约：释放时段 + 退回权益。两边在同一个事务里。"""
+    res = reservation_repo.get_by_id(order_id)
     if res is None:
         raise BizError("预约不存在")
     if res["user_id"] != user_id:
         raise BizError("只能取消自己的预约")
-    if res["status"] not in ("待使用", "使用中"):
-        raise BizError(f"当前状态是「{res['status']}」，不能取消")
+    if int(res["order_status"]) not in (ORDER_PENDING, ORDER_ONGOING):
+        raise BizError("当前状态不允许取消（只有待使用/进行中可以取消）")
 
     with uow() as cur:
-        if reservation_repo.cancel(reservation_id, cur=cur) == 0:
+        if reservation_repo.cancel(order_id, cur=cur) == 0:
             raise BizError("取消失败，预约状态刚刚变了，请刷新")
-        _refund(cur, res["card_id"], float(res["amount"]), res["hours"])
+        _refund(cur, res["card_id"], float(res["amount"]), res["duration"], user_id)
 
-    return {"reservation_id": reservation_id, "refund": float(res["amount"])}
+    return {"order_id": order_id, "refund": float(res["amount"])}
 
 
-def check_in(reservation_id):
-    """到店签到：待使用 -> 使用中。
+def check_in(order_id, user_id=None):
+    """到店签到：待使用(1) -> 进行中(2)。
 
     注意：这一步由谁触发还没拍板（管理员手工签到 or 定时任务），见 DESIGN.md 的 A1。
     """
-    res = reservation_repo.get_by_id(reservation_id)
+    res = reservation_repo.get_by_id(order_id)
     if res is None:
         raise BizError("预约不存在")
-    if res["status"] != "待使用":
-        raise BizError(f"当前状态是「{res['status']}」，不能签到")
-    reservation_repo.update_status(reservation_id, "使用中")
+    if user_id is not None and res["user_id"] != user_id:
+        raise BizError("只能操作自己的预约")
+    if int(res["order_status"]) != ORDER_PENDING:
+        raise BizError("只有「待使用」的预约可以签到")
+    reservation_repo.update_status(order_id, ORDER_ONGOING)
     return True
 
 
-def finish(reservation_id):
-    """结束使用：使用中 -> 已完成。"""
-    res = reservation_repo.get_by_id(reservation_id)
+def finish(order_id):
+    """结束使用：进行中(2) -> 已完成(3)。"""
+    res = reservation_repo.get_by_id(order_id)
     if res is None:
         raise BizError("预约不存在")
-    if res["status"] != "使用中":
-        raise BizError(f"当前状态是「{res['status']}」，不能结束")
-    reservation_repo.update_status(reservation_id, "已完成")
+    if int(res["order_status"]) != ORDER_ONGOING:
+        raise BizError("只有「进行中」的预约可以结束")
+    reservation_repo.update_status(order_id, ORDER_DONE)
     return True
+
+
+def expire_overdue():
+    """把过期未使用的预约标成已过期(5)并释放时段。返回更新行数。"""
+    return reservation_repo.expire_overdue()
 
 
 def list_my_orders(user_id, page=1, page_size=20):
@@ -177,8 +287,8 @@ def list_my_orders(user_id, page=1, page_size=20):
             reservation_repo.count_by_user(user_id))
 
 
-def list_orders(store_id=None, status=None, page=1, page_size=20):
+def list_orders(store_id=None, order_status=None, page=1, page_size=20):
     """管理端订单列表。返回 (数据列表, 总条数)。"""
     offset = (max(page, 1) - 1) * page_size
-    return (reservation_repo.list_paged(store_id, status, offset, page_size),
-            reservation_repo.count_paged(store_id, status))
+    return (reservation_repo.list_paged(store_id, order_status, offset, page_size),
+            reservation_repo.count_paged(store_id, order_status))

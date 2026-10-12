@@ -4,7 +4,9 @@
 """
 from datetime import date, datetime, timedelta
 
-from repository import recharge_repo, reservation_repo, seat_repo, store_repo, user_repo
+from config import ORDER_CANCELLED, ORDER_DONE, ORDER_PENDING, STATUS_ON
+from repository import (recharge_repo, reservation_repo, seat_repo, store_repo,
+                        user_repo)
 
 
 def _days_ago(days):
@@ -13,8 +15,8 @@ def _days_ago(days):
 
 def _hours_between(open_time, close_time):
     """营业时长（小时）。"""
-    o = datetime.strptime(str(open_time), "%H:%M:%S")
-    c = datetime.strptime(str(close_time), "%H:%M:%S")
+    o = datetime.strptime(str(open_time)[:8], "%H:%M:%S")
+    c = datetime.strptime(str(close_time)[:8], "%H:%M:%S")
     return max((c - o).seconds // 3600, 1)
 
 
@@ -22,15 +24,20 @@ def overview(days=30):
     """看板顶部的一组汇总数字。"""
     start, end = _days_ago(days)
     stores = store_repo.list_all()
+    seat_total = 0
+    for s in stores:
+        seat_total += seat_repo.count_by_store(s["store_id"])
+
     return {
         "门店数": len(stores),
-        "座位数": sum(seat_repo.count_by_store(s["store_id"]) for s in stores),
+        "座位数": seat_total,
         "用户数": user_repo.count(),
         "充值金额": float(recharge_repo.sum_amount(start, end)),
+        "退款金额": float(recharge_repo.sum_refunded(start, end)),
         "预约总数": reservation_repo.count_between(start, end),
-        "待使用": reservation_repo.count_by_status("待使用"),
-        "已完成": reservation_repo.count_by_status("已完成"),
-        "已取消": reservation_repo.count_by_status("已取消"),
+        "待使用": reservation_repo.count_by_status(ORDER_PENDING),
+        "已完成": reservation_repo.count_by_status(ORDER_DONE),
+        "已取消": reservation_repo.count_by_status(ORDER_CANCELLED),
     }
 
 
@@ -55,12 +62,18 @@ def hot_hours(store_id=None, days=30):
     return reservation_repo.count_by_hour(store_id, days)
 
 
+def reservations_by_store(days=30):
+    """各门店预约量（柱状图用）。"""
+    start, end = _days_ago(days)
+    return reservation_repo.count_by_store(start, end)
+
+
 def seat_utilization(store_id, days=30):
     """座位利用率：已预约的时段数 ÷（可用座位数 × 天数 × 营业小时数）。"""
     store = store_repo.get_by_id(store_id)
     if store is None:
         return 0.0
-    seats = seat_repo.count_by_store(store_id, status="可用")
+    seats = seat_repo.count_by_store(store_id, status=STATUS_ON)
     if seats == 0:
         return 0.0
     capacity = seats * max(days, 1) * _hours_between(store["open_time"], store["close_time"])
