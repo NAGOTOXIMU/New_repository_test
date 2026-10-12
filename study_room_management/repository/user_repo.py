@@ -1,24 +1,74 @@
-"""用户表（`user`）的数据访问。
+"""用户表（`user`）的数据访问。所有 SQL 只在本文件里。"""
+from db.connection import get_conn
 
-本层只做一件事：执行 SQL，把结果返回给 services。
-    - 查询返回 dict 或 list[dict]（连接使用 DictCursor）
-    - 写操作返回影响行数或新主键
-    - 全部使用 %s 占位符参数化，严禁字符串拼接（防 SQL 注入）
 
-禁止：
-    - 任何业务判断（"余额够不够"由 services 决定怎么处理）
-    - import streamlit
-    - 自己开事务（事务由 services 通过 db/uow.py 打开）
+def get_by_username(username):
+    """按用户名查用户。查到返回 dict，查不到返回 None。"""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT user_id, username, password, real_name, phone, email, status "
+                "FROM `user` WHERE username = %s",
+                (username,),
+            )
+            return cur.fetchone()
+    finally:
+        conn.close()
 
-预期函数（按需增删）：
-    get_by_id(user_id)                  查单个用户
-    get_by_username(username)           登录用
-    exists_username(username)           注册查重
-    exists_phone(phone)                 注册查重
-    create(username, password_hash, real_name, phone, email) -> 新 user_id
-    update_profile(user_id, real_name, phone, email)
-    update_password(user_id, password_hash)
-    update_status(user_id, status)      冻结 / 解冻
-    list_paged(keyword, offset, limit)  管理端列表（服务端分页）
-    count(keyword)                      分页总数
-"""
+
+def get_by_id(user_id):
+    """按 ID 查用户（不带密码字段）。查到返回 dict，查不到返回 None。"""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "SELECT user_id, username, real_name, phone, email, status "
+                "FROM `user` WHERE user_id = %s",
+                (user_id,),
+            )
+            return cur.fetchone()
+    finally:
+        conn.close()
+
+
+def exists_username(username):
+    """用户名是否已被注册。"""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS n FROM `user` WHERE username = %s", (username,))
+            return cur.fetchone()["n"] > 0
+    finally:
+        conn.close()
+
+
+def exists_phone(phone):
+    """手机号是否已被占用。"""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute("SELECT COUNT(*) AS n FROM `user` WHERE phone = %s", (phone,))
+            return cur.fetchone()["n"] > 0
+    finally:
+        conn.close()
+
+
+def create(username, password_hash, real_name, phone, email):
+    """插入一个新用户，返回新的 user_id。"""
+    conn = get_conn()
+    try:
+        with conn.cursor() as cur:
+            cur.execute(
+                "INSERT INTO `user` (username, password, real_name, phone, email) "
+                "VALUES (%s, %s, %s, %s, %s)",
+                (username, password_hash, real_name, phone, email),
+            )
+            new_id = cur.lastrowid
+        conn.commit()
+        return new_id
+    except Exception:
+        conn.rollback()
+        raise
+    finally:
+        conn.close()
