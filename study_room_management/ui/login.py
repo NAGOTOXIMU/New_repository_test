@@ -1,13 +1,38 @@
-"""登录（与注册）页面。
+"""登录 / 注册页面。只做三件事：收集输入 → 调 service → 显示结果。"""
+import streamlit as st
 
-职责：
-    - 用 st.form 收集用户名 / 密码（用 form 包住，避免每敲一个字就重跑脚本查库）
-    - 调用 services/user_service.login()
-    - 成功后把用户信息写进 st.session_state["user"]（界面状态由 ui 层负责写）
-    - 失败时显示 services 抛出的 BizError 文案
-    - 注册表单同理，调 user_service.register()
+from services import user_service
+from services.exceptions import BizError
 
-注意：
-    - 本文件由 app.py 在未登录时通过 st.navigation 挂载
-    - 不写 SQL、不写业务判断
-"""
+st.title("自习室预约系统")
+
+tab_login, tab_register = st.tabs(["登录", "注册"])
+
+with tab_login:
+    with st.form("login_form"):
+        username = st.text_input("用户名")
+        password = st.text_input("密码", type="password")
+        submitted = st.form_submit_button("登录", use_container_width=True)
+
+    if submitted:
+        try:
+            user = user_service.login(username, password)
+            st.session_state["user"] = user      # 登录成功的标志
+            st.rerun()
+        except BizError as e:
+            st.error(str(e))
+
+with tab_register:
+    with st.form("register_form"):
+        r_username = st.text_input("用户名", key="r_username")
+        r_password = st.text_input("密码", type="password", key="r_password")
+        r_real_name = st.text_input("姓名", key="r_real_name")
+        r_phone = st.text_input("手机号", key="r_phone")
+        r_submitted = st.form_submit_button("注册", use_container_width=True)
+
+    if r_submitted:
+        try:
+            user_service.register(r_username, r_password, r_real_name, r_phone)
+            st.success("注册成功，请到「登录」标签页登录")
+        except BizError as e:
+            st.error(str(e))

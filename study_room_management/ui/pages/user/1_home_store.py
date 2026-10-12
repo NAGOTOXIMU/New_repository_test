@@ -1,11 +1,14 @@
-"""用户端 · 首页与门店列表。
+"""用户端首页。先占位，后面换成真正的门店列表。"""
+import streamlit as st
 
-职责：
-    - 展示门店列表（名称、地址、营业时间、座位数）
-    - 支持按门店名 / 地址筛选
-    - 选中门店后跳转到座位预约页（st.switch_page 或写入 session_state）
+user = st.session_state["user"]
 
-依赖：services/store_service.py
+st.title(f"欢迎，{user['real_name']}")
 
-注意：本文件不会被自动发现，必须在 app.py 里注册。
-"""
+with st.sidebar:
+    st.write(f"当前用户：{user['username']}")
+    if st.button("退出登录"):
+        st.session_state.clear()
+        st.rerun()
+
+st.info("门店列表与座位预约功能开发中……")
