@@ -1,0 +1,9 @@
+# 依赖清单，安装：pip install -r requirements.txt
+#
+# 预期包含（按实际使用增删）：
+#   streamlit       界面框架
+#   PyMySQL         MySQL 驱动
+#   pandas          表格数据处理（Streamlit 的依赖，可直接使用）
+#   bcrypt          密码哈希（若最终选它，见 docs/DESIGN.md 的 B4）
+#
+# 注意：第一次跑通后把版本号固定下来，避免组员之间环境不一致
