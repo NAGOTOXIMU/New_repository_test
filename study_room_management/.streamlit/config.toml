@@ -1,0 +1,17 @@
+# Streamlit 主题：对应 design-preview 的「notion-pre-ai」配色（白纸 + 奶油面 + 暖黑）。
+# 只放颜色/字体这类主题级设置；卡片、发丝线、圆角、渐变底在 ui/theme.py 里用 CSS 注入。
+# 注意：这里的键名写错会导致 Streamlit 启动报错，改动后请重启确认。
+
+[theme]
+base = "light"
+primaryColor = "#2383E2"
+backgroundColor = "#FFFFFF"
+secondaryBackgroundColor = "#F7F6F3"
+textColor = "#37352F"
+font = "sans serif"
+
+[server]
+headless = true
+
+[browser]
+gatherUsageStats = false

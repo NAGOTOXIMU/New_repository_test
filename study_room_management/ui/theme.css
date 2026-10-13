@@ -1,0 +1,175 @@
+/* 全站样式：design-preview 的 v3 设计（notion-pre-ai 配方）落到 Streamlit。
+   这个文件由 ui/theme.py 的 apply() 每次渲染时从磁盘读取 —— 改完刷新浏览器即可，
+   不用重启 Streamlit。
+
+   改样式前先知道两件事：
+   1) 选择器依赖 Streamlit 内部的 data-testid 和 st-key-* 类名。升级 Streamlit 后样式若失效，
+      按 F12 搜这两个名字看是否改名，不要怀疑业务代码。
+   2) 改配色优先改下面的 token，不要在散落的规则里硬编码颜色。 */
+
+/* ── 设计 token：与原型同一套 ── */
+:root{
+  --ground:#FFFFFF; --cream:#F7F6F3; --cream-deep:#EFEEEB;
+  --ink:#37352F; --ink-2:#787774; --ink-3:#9B9A97;
+  --hair:#E9E9E7; --hair-deep:#DDDCD8; --link:#2383E2;
+  --mint:#E4F4F1; --mint-ink:#2F6F63;
+  --peach:#FFEDD5; --peach-ink:#8C6239;
+  --r-sm:4px; --r-md:8px; --r-lg:16px;
+  --sh-rest:0 1px 2px rgba(15,15,15,.04);
+  --sh-lift:0 2px 8px rgba(15,15,15,.04),0 6px 18px rgba(15,15,15,.07);
+  --sh-pop:0 4px 12px rgba(15,15,15,.06),0 16px 40px rgba(15,15,15,.12);
+  --ease:cubic-bezier(.22,1,.36,1);
+}
+
+/* ── 字体：不引远程字体（避免离线/被墙），用系统栈 ── */
+html, body, button, input, textarea, select{
+  font-family:'Inter',-apple-system,'Segoe UI','Microsoft YaHei',sans-serif;
+}
+/* Streamlit 自带的右上角工具栏和右下角运行指示：原型里没有，藏掉 */
+#MainMenu, footer, [data-testid="stToolbar"], [data-testid="stStatusWidget"]{
+  visibility:hidden; display:none;
+}
+
+/* ── 主区：暖灰渐变底 + 内容居中（原型 .main / .main-inner） ── */
+[data-testid="stAppViewContainer"]{background:linear-gradient(170deg,#FAF9F7 0%,#F3F2EE 100%)}
+[data-testid="stHeader"]{background:transparent}
+[data-testid="stMainBlockContainer"]{
+  max-width:1120px; margin:0 auto; padding-top:2.6rem; padding-bottom:4rem;
+}
+
+/* ── 标题：衬线 + 流式字号。Streamlit 自己给 h1 上了字体，必须 !important 才盖得住 ── */
+h1, h2, h3, [data-testid="stHeading"] h1, [data-testid="stHeading"] h2,
+[data-testid="stHeading"] h3{
+  font-family:Georgia,'Source Serif 4','Songti SC','SimSun',serif !important;
+  font-weight:500; letter-spacing:-.01em; color:var(--ink);
+}
+h1{font-size:clamp(22px,1.4vw+16px,30px)}
+h2{font-size:clamp(18px,1vw+13px,22px)}
+[data-testid="stCaptionContainer"]{color:var(--ink-2)}
+
+/* ── 卡片：st.container(border=True) 是画卡片的标准做法 ── */
+[data-testid="stVerticalBlockBorderWrapper"]:has(> div > [data-testid="stVerticalBlock"]){
+  background:#fff; border:1px solid var(--hair) !important; border-radius:var(--r-lg) !important;
+  padding:24px; box-shadow:var(--sh-rest);
+  transition:transform .22s var(--ease), box-shadow .22s var(--ease);
+}
+[data-testid="stVerticalBlockBorderWrapper"]:hover{transform:translateY(-2px); box-shadow:var(--sh-lift)}
+
+/* ── 指标卡：白底 + 抬升（原型 .metric） ── */
+[data-testid="stMetric"]{
+  background:#fff; border:1px solid var(--hair); border-radius:var(--r-lg);
+  padding:18px 22px; box-shadow:var(--sh-rest); min-width:0;
+  transition:transform .22s var(--ease), box-shadow .22s var(--ease);
+}
+[data-testid="stMetric"]:hover{transform:translateY(-3px); box-shadow:var(--sh-lift)}
+[data-testid="stMetricLabel"] p{font-size:12px !important; color:var(--ink-3) !important}
+[data-testid="stMetricValue"]{font-size:clamp(20px,1.6vw+14px,26px) !important; letter-spacing:-.02em}
+
+/* 指标卡那一行：宽度不够就整列折行，等价原型的 repeat(auto-fit,minmax(175px,1fr))。
+   只对「含指标卡的行」生效 —— 表单和按钮行不能动，否则一行的控件会被拆散、留出大片空白。 */
+[data-testid="stHorizontalBlock"]:has([data-testid="stMetric"]){flex-wrap:wrap}
+[data-testid="stHorizontalBlock"]:has([data-testid="stMetric"]) > [data-testid="stColumn"]{
+  flex:1 1 175px !important; min-width:175px !important;
+}
+
+/* ── 按钮：主按钮暖黑底白字（原型 .btn-primary） ── */
+[data-testid="stBaseButton-primary"], button[kind="primary"]{
+  background:var(--ink); color:#fff; border:1px solid transparent; border-radius:var(--r-md);
+}
+[data-testid="stBaseButton-primary"]:hover, button[kind="primary"]:hover{
+  background:var(--ink); color:#fff; transform:translateY(-2px); box-shadow:var(--sh-lift);
+}
+[data-testid="stBaseButton-secondary"], button[kind="secondary"]{
+  border-radius:var(--r-md); border-color:var(--hair-deep); color:var(--ink);
+}
+
+/* ── 输入框 / 下拉：圆角 + 发丝线 + 聚焦描边（原型 .field） ── */
+[data-baseweb="input"], [data-baseweb="select"] > div, [data-baseweb="textarea"]{
+  border-radius:var(--r-md) !important; border-color:var(--hair-deep) !important;
+  background:#fff;
+}
+[data-baseweb="input"]:focus-within, [data-baseweb="select"] > div:focus-within{
+  border-color:var(--ink) !important; box-shadow:0 0 0 3px rgba(55,53,47,.08) !important;
+}
+
+/* ── 表格：圆角 + 发丝线 ── */
+[data-testid="stDataFrame"], [data-testid="stDataFrameResizable"]{
+  border:1px solid var(--hair); border-radius:var(--r-md); overflow:hidden;
+}
+
+/* ── 侧边栏：奶油色 + 发丝线（原型 .side） ── */
+[data-testid="stSidebar"]{
+  background:var(--cream); border-right:1px solid var(--hair);
+}
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a{
+  border-radius:var(--r-md); transition:background .22s var(--ease), color .22s var(--ease);
+}
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a:hover{background:#fff; color:var(--ink)}
+[data-testid="stSidebar"] [data-testid="stSidebarNav"] a[aria-current="page"]{
+  background:rgba(35,131,226,.09); color:var(--ink); font-weight:500;
+}
+
+/* ── 侧边栏内部顺序 ──
+   坑：品牌区和用户区都被 Streamlit 塞进 stSidebarUserContent（一个排在导航之后的容器），
+   Python 里挪不动。中间几层「壳」用 display:contents 拆掉，让两块变成侧边栏的直接子项，
+   再靠 flex order 排成「品牌 → 导航 → 用户区(贴底)」。 */
+[data-testid="stSidebarContent"]{display:flex; flex-direction:column; min-height:100%}
+[data-testid="stSidebarUserContent"],
+[data-testid="stSidebarUserContent"] > div,
+[data-testid="stSidebarUserContent"] > div > [data-testid="stVerticalBlock"],
+[data-testid="stSidebarUserContent"] [data-testid="stLayoutWrapper"]{display:contents}
+[data-testid="stSidebarHeader"]{order:0}
+.st-key-side_brand{order:1; padding:0 4px 14px; border-bottom:1px solid var(--hair)}
+[data-testid="stSidebarNav"]{order:2; margin-top:10px}
+.st-key-side_user{order:3; margin-top:auto; border-top:1px solid var(--hair); padding-top:10px}
+
+/* ── 侧边栏用户菜单：整行一个按钮，左侧圆形头像（::before 画，不用图片） ── */
+.st-key-side_user [data-testid="stPopover"], .st-key-side_user [data-testid="stPopover"] > div{width:100%}
+.st-key-side_user [data-testid="stPopover"] button{
+  width:100%; justify-content:flex-start; gap:10px; padding:6px 8px;
+  background:transparent; border:1px solid transparent; border-radius:var(--r-md);
+  color:var(--ink); font-size:13.5px; font-weight:500; text-align:left;
+}
+.st-key-side_user [data-testid="stPopover"] button:hover{background:#fff; border-color:var(--hair)}
+.st-key-side_user [data-testid="stPopover"] button::before{
+  content:''; width:28px; height:28px; flex:0 0 auto; border-radius:50%;
+  background:linear-gradient(145deg,#5E6AD2,#4A54B8);
+}
+
+/* ── 侧边栏品牌区（ui/theme.py 的 brand_html 生成的 HTML） ── */
+.side-brand{display:flex; align-items:center; gap:10px}
+.side-brand .mark{width:32px; height:32px; flex:0 0 auto; border-radius:var(--r-md);
+  background:var(--ink); display:grid; place-items:center}
+.side-brand .name{font-size:14.5px; font-weight:600; letter-spacing:-.01em; color:var(--ink)}
+.side-brand .sub{font-size:12px; color:var(--ink-3)}
+
+/* ── 用户弹出菜单里的信息块 ── */
+.user-menu-txt{font-size:13px; color:var(--ink-2); line-height:1.7}
+.user-menu-txt .mono{font-family:'JetBrains Mono',Consolas,monospace; color:var(--ink)}
+
+/* ── 登录页：居中卡片（原型 .login-card） ── */
+.st-key-login_card{
+  max-width:400px; margin:6vh auto 0; background:#fff; border:1px solid var(--hair);
+  border-radius:var(--r-lg); padding:40px 40px 24px; box-shadow:var(--sh-rest);
+}
+.login-brand{display:flex; align-items:center; gap:12px; margin-bottom:36px}
+.login-brand .mark{width:34px; height:34px; flex:0 0 auto; border-radius:var(--r-md);
+  background:var(--ink); display:grid; place-items:center}
+.login-brand .name{font-size:15px; font-weight:600; color:var(--ink)}
+.login-brand .sub{font-size:12px; color:var(--ink-3)}
+.login-title{font-family:Georgia,'Source Serif 4','Songti SC',serif; font-size:clamp(24px,3vw,30px);
+  font-weight:500; letter-spacing:-.01em; color:var(--ink); margin-bottom:4px}
+.login-desc{font-size:14px; color:var(--ink-2); margin-bottom:28px}
+
+/* ── 提示条：统一的圆角 ── */
+[data-testid="stAlert"]{border-radius:var(--r-md)}
+
+/* ── 响应式 ── */
+@media (max-width:899px){
+  [data-testid="stMainBlockContainer"]{padding-top:1.6rem}
+}
+@media (max-width:640px){
+  [data-testid="stMainBlockContainer"]{padding-left:1rem; padding-right:1rem}
+  [data-testid="stMetric"]{padding:14px 16px}
+  .st-key-login_card{padding:28px 24px 20px; margin-top:2vh}
+}

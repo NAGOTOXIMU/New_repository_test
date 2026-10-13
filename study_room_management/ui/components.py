@@ -1,8 +1,9 @@
-"""通用 UI 组件：身份信息、权限断言、状态名映射。"""
+"""通用 UI 组件：身份信息、权限断言、状态名映射、侧边栏。"""
 import streamlit as st
 
 from config import (AREA_NAMES, KIND_NAMES, MEMBER_LEVEL_NAMES, ORDER_STATUS_NAMES,
                     PAY_STATUS_NAMES, STATUS_ON)
+from ui.theme import brand_html
 
 
 def display_name(user=None):
@@ -18,22 +19,43 @@ def account_label(user=None):
     return user.get("phone") or user.get("username") or ""
 
 
+def _user_menu_html(user, is_admin):
+    """用户弹出菜单里的信息块（菜单项由 st.popover 里的组件提供）。"""
+    rows = [f'<div class="user-menu-txt"><b>{display_name(user)}</b>']
+    account = account_label(user)
+    if account:
+        rows.append(f'<div class="mono">{account}</div>')
+    if is_admin:
+        rows.append(f'<div>{user.get("role_name") or "管理员"}</div>')
+    else:
+        level = MEMBER_LEVEL_NAMES.get(int(user.get("member_level") or 0), "普通用户")
+        rows.append(f'<div>{level}</div>')
+        rows.append(f'<div>余额 <span class="mono">{user.get("balance", 0)}</span> 元 · '
+                    f'剩余 <span class="mono">{user.get("remaining_hours", 0)}</span> 小时</div>')
+    rows.append('</div>')
+    return ''.join(rows)
+
+
 def sidebar_user():
-    """侧边栏：显示当前登录人 + 退出登录按钮。返回当前 user dict。"""
+    """侧边栏：顶部品牌区 + 底部「头像 + 用户菜单」。返回当前 user dict。
+
+    注意：Streamlit 的页面导航由它自己插在侧边栏里，Python 里挪不动，
+    品牌区排到导航上方靠的是 ui/theme.py 里的 flex order，别在这里改顺序。
+    """
     user = st.session_state.get("user") or {}
+    is_admin = user.get("role") == "admin"
+
     with st.sidebar:
-        st.write(f"当前用户：{display_name(user)}")
-        st.caption(f"账号：{account_label(user)}")
-        if user.get("role") == "user":
-            st.caption(f"余额：{user.get('balance', 0)} 元 ｜ "
-                       f"剩余时长：{user.get('remaining_hours', 0)} 小时")
-            level = MEMBER_LEVEL_NAMES.get(int(user.get("member_level") or 0), "普通用户")
-            st.caption(f"会员等级：{level}")
-        elif user.get("role") == "admin":
-            st.caption(f"角色：{user.get('role_name', '普通运营员')}")
-        if st.button("退出登录"):
-            st.session_state.clear()
-            st.rerun()
+        with st.container(key="side_brand"):
+            st.markdown(brand_html("自习室", "管理端" if is_admin else "用户端"),
+                        unsafe_allow_html=True)
+
+        with st.container(key="side_user"):
+            with st.popover(display_name(user)):
+                st.markdown(_user_menu_html(user, is_admin), unsafe_allow_html=True)
+                if st.button("退出登录", width="stretch", key="logout_btn"):
+                    st.session_state.clear()
+                    st.rerun()
     return user
 
 

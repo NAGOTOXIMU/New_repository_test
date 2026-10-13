@@ -1,10 +1,15 @@
-"""项目总入口：登录门卫 + 导航组装。
+"""项目总入口：全站样式 + 登录门卫 + 导航组装。
 
 注意：ui/pages/ 下的页面不会被 Streamlit 自动发现，必须在这里用 st.Page() 注册。
 """
 import streamlit as st
 
+from ui.theme import apply as apply_theme
+
 st.set_page_config(page_title="自习室预约系统", layout="wide")
+
+# 样式注入必须在这里（入口每轮都会执行，页面脚本之前），登录页和登录后的页面才会都有样式
+apply_theme()
 
 # ——— 门卫：没登录就只挂登录页 ———
 current = st.session_state.get("user")

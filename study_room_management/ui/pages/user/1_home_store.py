@@ -19,7 +19,15 @@ picked = st.selectbox("选择门店", list(store_map.keys()))
 store = store_map[picked]
 
 col1, col2, col3 = st.columns(3)
-col1.metric("营业时间", f"{store['open_time']} - {store['close_time']}")
+def _hm(value):
+    """营业时间显示成 08:00（MySQL 的 TIME 取出来是 timedelta，str() 是 8:00:00）。"""
+    if hasattr(value, "total_seconds"):          # timedelta
+        total = int(value.total_seconds())
+        return f"{total // 3600:02d}:{total % 3600 // 60:02d}"
+    return value.strftime("%H:%M") if hasattr(value, "strftime") else str(value)[:5]
+
+
+col1.metric("营业时间", f"{_hm(store['open_time'])} - {_hm(store['close_time'])}")
 col2.metric("座位总数", store["seat_count"])
 col3.metric("可用座位", store_service.count_seats(store["store_id"], status=STATUS_ON))
 
