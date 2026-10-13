@@ -1,4 +1,3 @@
--- =============================================================================
 --  索引核对
 --  文件  : db/sql/02_indexes.sql
 --
@@ -23,7 +22,6 @@
 --                       idx_res_date_status, idx_res_card
 --    recharge_order     PRIMARY, uk_recharge_no, ★ idx_ro_user_status,
 --                       idx_ro_paytime, idx_ro_card
--- =============================================================================
 
 USE study_room_management;
 

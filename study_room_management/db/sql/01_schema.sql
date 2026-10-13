@@ -1,4 +1,3 @@
--- =============================================================================
 --  共享自习室门店运营与会员管理系统 —— 建表脚本
 --  文件    : db/sql/01_schema.sql
 --  基准    : 《数据库规范》V1.0（study_room_management）
@@ -21,7 +20,6 @@
 --      于是该时段被真正释放，用户可以重新预约。
 --
 --  维护者：全组公共依赖 —— 改表前必须在群里说，由一个人统一改，改完同步所有人
--- =============================================================================
 
 CREATE DATABASE IF NOT EXISTS study_room_management
   CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
@@ -38,9 +36,7 @@ DROP TABLE IF EXISTS `user`;
 DROP TABLE IF EXISTS store;
 
 
--- =============================================================================
 -- 1. 门店表 store
--- =============================================================================
 CREATE TABLE store (
   store_id    INT AUTO_INCREMENT PRIMARY KEY COMMENT '门店唯一ID',
   store_name  VARCHAR(100) NOT NULL COMMENT '门店名称',
@@ -59,11 +55,9 @@ CREATE TABLE store (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='自习室门店表';
 
 
--- =============================================================================
 -- 2. 用户表 user
 --    phone 是唯一登录账号（规范规定）。
 --    password_hash 存 pbkdf2 哈希，严禁存明文。
--- =============================================================================
 CREATE TABLE `user` (
   user_id       INT AUTO_INCREMENT PRIMARY KEY COMMENT '用户唯一ID',
   phone         VARCHAR(20) NOT NULL COMMENT '手机号，唯一登录账号',
@@ -84,10 +78,8 @@ CREATE TABLE `user` (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户会员表';
 
 
--- =============================================================================
 -- 3. 管理员表 admin
 --    store_id 为 NULL 表示超级管理员（可管理所有门店）。
--- =============================================================================
 CREATE TABLE admin (
   admin_id      INT AUTO_INCREMENT PRIMARY KEY COMMENT '管理员唯一ID',
   username      VARCHAR(30) NOT NULL COMMENT '登录账号',
@@ -108,10 +100,8 @@ CREATE TABLE admin (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='后台管理员表';
 
 
--- =============================================================================
 -- 4. 会员卡种表 card_type（字典表：卖什么卡）
 --    kind=1 时长卡：value=分钟数   2 次卡：value=次数   3 储值卡
--- =============================================================================
 CREATE TABLE card_type (
   card_type_id INT AUTO_INCREMENT PRIMARY KEY COMMENT '卡种唯一ID',
   card_name    VARCHAR(50) NOT NULL COMMENT '卡种名称，如日卡、月卡',
@@ -132,10 +122,8 @@ CREATE TABLE card_type (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='会员卡产品配置表';
 
 
--- =============================================================================
 -- 5. 座位表 seat
 --    area_type：1普通区 2安静区 3靠窗区
--- =============================================================================
 CREATE TABLE seat (
   seat_id    INT AUTO_INCREMENT PRIMARY KEY COMMENT '座位唯一ID',
   store_id   INT NOT NULL COMMENT '所属门店ID（外键）',
@@ -160,13 +148,11 @@ CREATE TABLE seat (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='座位信息表';
 
 
--- =============================================================================
 -- 6. 用户持卡实例表 user_card（★ 规范缺口补充，核心账务表）
 --
 --    card_type 是「卖什么卡」的字典，user_card 是「用户实际持有的那张卡」，
 --    余额 / 剩余次数 / 剩余分钟都挂在 user_card 上，才能按卡归属、按卡扣减。
 --    user.balance / user.remaining_hours 是这张表的汇总冗余，便于列表页快速展示。
--- =============================================================================
 CREATE TABLE user_card (
   card_id           INT AUTO_INCREMENT PRIMARY KEY COMMENT '持卡实例ID',
   card_no           VARCHAR(32) NOT NULL COMMENT '卡号（业务唯一号）',
@@ -194,7 +180,6 @@ CREATE TABLE user_card (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户持卡实例表（账户：余额/次数/时长）';
 
 
--- =============================================================================
 -- 7. 预约订单表 reservation_order（★ 核心：座位 × 日期的时段占用）
 --    order_status：1待使用 2进行中 3已完成 4已取消 5已过期
 --    duration 单位：分钟
@@ -204,7 +189,6 @@ CREATE TABLE user_card (
 --    取消时把 active_flag 置为 NULL —— MySQL 唯一索引允许多个 NULL，
 --    于是「已取消」的记录不再占用时段，用户还能重新预约同一时段。
 --    （普通方案做不到：改成 order_status=4 后唯一键仍被占住。）
--- =============================================================================
 CREATE TABLE reservation_order (
   order_id     INT AUTO_INCREMENT PRIMARY KEY COMMENT '预约订单唯一ID',
   order_no     VARCHAR(32) NOT NULL COMMENT '预约单号（幂等键）',
@@ -245,12 +229,10 @@ CREATE TABLE reservation_order (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='座位预约订单表';
 
 
--- =============================================================================
 -- 8. 充值订单表 recharge_order（资金流水）
 --    pay_status：0待支付 1已支付 2已退款
 --    order_no 是幂等键：用户重复点击「提交」时靠它的唯一约束挡住重复下单。
 --    card_type_id = 买的卡种；card_id = 支付成功后生成/累加的那张持卡实例。
--- =============================================================================
 CREATE TABLE recharge_order (
   recharge_id  INT AUTO_INCREMENT PRIMARY KEY COMMENT '充值订单唯一ID',
   order_no     VARCHAR(32) NOT NULL COMMENT '业务单号（幂等键）',
@@ -278,10 +260,8 @@ CREATE TABLE recharge_order (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户充值订单表';
 
 
--- =============================================================================
 -- 建表完成：8 张表
 --   store / user / admin / card_type / seat / user_card / reservation_order
 --   / recharge_order
 --
 -- 下一步：执行 02_indexes.sql 补查询索引，再执行 03_seed.sql 灌测试数据。
--- =============================================================================
