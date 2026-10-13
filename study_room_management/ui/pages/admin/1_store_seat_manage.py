@@ -9,10 +9,11 @@ import streamlit as st
 from config import STATUS_OFF, STATUS_ON
 from services import store_service
 from services.exceptions import BizError
-from ui.components import area_name, on_off, require_role, sidebar_user
+from ui.components import flash, area_name, on_off, require_role, sidebar_user
 
 require_role("admin")
 sidebar_user()
+flash()
 
 st.title("门店与座位管理")
 
@@ -92,7 +93,7 @@ with tab_store:
                 try:
                     sid = store_service.create_store(n_name, n_addr,
                                                      _hhmmss(n_open), _hhmmss(n_close))
-                    st.success(f"门店创建成功，store_id={sid}")
+                    flash(f"门店创建成功，store_id={sid}")
                     st.rerun()
                 except BizError as e:
                     st.error(str(e))
@@ -114,7 +115,7 @@ with tab_store:
             if st.button("保存营业状态"):
                 try:
                     store_service.set_store_status(target["store_id"], new_status)
-                    st.success("已更新")
+                    flash("已更新")
                     st.rerun()
                 except BizError as e:
                     st.error(str(e))
@@ -137,7 +138,7 @@ with tab_store:
                             store_service.update_store(
                                 target["store_id"], store_name=e_name, address=e_addr,
                                 open_time=_hhmmss(e_open), close_time=_hhmmss(e_close))
-                            st.success("已更新")
+                            flash("已更新")
                             st.rerun()
                         except BizError as e:
                             st.error(str(e))
@@ -172,7 +173,7 @@ with tab_seat:
         if st.form_submit_button("批量新增"):
             try:
                 n = store_service.batch_add_seats(store_id, prefix, int(count), area, socket)
-                st.success(f"新增 {n} 个座位")
+                flash(f"新增 {n} 个座位")
                 st.rerun()
             except BizError as e:
                 st.error(str(e))
@@ -206,7 +207,7 @@ with tab_seat:
         if st.button("保存座位状态"):
             try:
                 store_service.set_seat_status(seat["seat_id"], new_seat_status)
-                st.success("已更新")
+                flash("已更新")
                 st.rerun()
             except BizError as e:
                 st.error(str(e))

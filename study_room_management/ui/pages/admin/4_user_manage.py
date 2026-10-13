@@ -7,10 +7,11 @@ import streamlit as st
 from config import MEMBER_LEVEL_NAMES, STATUS_OFF, STATUS_ON
 from services import user_service
 from services.exceptions import BizError
-from ui.components import order_status_name, pay_status_name, require_role, sidebar_user
+from ui.components import flash, order_status_name, pay_status_name, require_role, sidebar_user
 
 require_role("admin")
 sidebar_user()
+flash()
 
 st.title("用户管理")
 
@@ -58,7 +59,7 @@ new_status = st.radio(
 if st.button("保存账号状态"):
     try:
         user_service.set_status(user_id, new_status)
-        st.success("已更新")
+        flash("已更新")
         st.rerun()
     except BizError as e:
         st.error(str(e))

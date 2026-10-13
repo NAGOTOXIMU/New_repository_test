@@ -9,10 +9,11 @@ import streamlit as st
 from config import KIND_HOURS, KIND_NAMES, KIND_STORED, KIND_TIMES, STATUS_OFF, STATUS_ON
 from services import card_type_service
 from services.exceptions import BizError
-from ui.components import kind_name, on_off, require_role, sidebar_user
+from ui.components import flash, kind_name, on_off, require_role, sidebar_user
 
 require_role("admin")
 sidebar_user()
+flash()
 
 st.title("卡种管理")
 
@@ -82,7 +83,7 @@ with col1:
             try:
                 ctid = card_type_service.create_card_type(
                     n_name, n_kind, n_price, int(n_value), int(n_days))
-                st.success(f"卡种创建成功，card_type_id={ctid}")
+                flash(f"卡种创建成功，card_type_id={ctid}")
                 st.rerun()
             except BizError as e:
                 st.error(str(e))
@@ -108,7 +109,7 @@ with col2:
         if st.button("保存上架状态"):
             try:
                 card_type_service.set_card_type_status(ctid, new_status)
-                st.success("已更新")
+                flash("已更新")
                 st.rerun()
             except BizError as e:
                 st.error(str(e))
@@ -127,7 +128,7 @@ with col2:
                     card_type_service.update_card_type(
                         ctid, card_name=e_name, price=e_price,
                         value=int(e_value), valid_days=int(e_days))
-                    st.success("已更新")
+                    flash("已更新")
                     st.rerun()
                 except BizError as e:
                     st.error(str(e))

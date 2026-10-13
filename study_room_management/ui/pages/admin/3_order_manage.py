@@ -9,10 +9,11 @@ from config import (ORDER_DONE, ORDER_ONGOING, ORDER_PENDING, ORDER_STATUS_NAMES
                     PAY_PAID, PAY_STATUS_NAMES)
 from services import order_service, recharge_service, store_service
 from services.exceptions import BizError
-from ui.components import order_status_name, pay_status_name, require_role, sidebar_user
+from ui.components import flash, order_status_name, pay_status_name, require_role, sidebar_user
 
 require_role("admin")
 sidebar_user()
+flash()
 
 admin = st.session_state.get("user") or {}
 # 普通运营员只看自己门店；超管（store_id 为 NULL）看全部
@@ -31,7 +32,7 @@ with tab_res:
     if st.button("把过期未使用的预约标记为「已过期」并释放时段"):
         try:
             n = order_service.expire_overdue()
-            st.success(f"已处理 {n} 条过期预约")
+            flash(f"已处理 {n} 条过期预约")
             st.rerun()
         except BizError as e:
             st.error(str(e))
@@ -98,7 +99,7 @@ with tab_res:
                          disabled=cur_status != ORDER_PENDING):
                 try:
                     order_service.check_in(target["order_id"])
-                    st.success("已签到")
+                    flash("已签到")
                     st.rerun()
                 except BizError as e:
                     st.error(str(e))
@@ -107,7 +108,7 @@ with tab_res:
                          disabled=cur_status != ORDER_ONGOING):
                 try:
                     order_service.finish(target["order_id"])
-                    st.success("已完成")
+                    flash("已完成")
                     st.rerun()
                 except BizError as e:
                     st.error(str(e))
@@ -164,7 +165,7 @@ with tab_recharge:
             if st.button("确认退款"):
                 try:
                     result = recharge_service.refund_order(target["order_no"])
-                    st.success(f"已退款 {result['refund']:.2f} 元")
+                    flash(f"已退款 {result['refund']:.2f} 元")
                     st.rerun()
                 except BizError as e:
                     st.error(str(e))

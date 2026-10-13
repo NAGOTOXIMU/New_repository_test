@@ -67,3 +67,20 @@ def area_name(value):
 
 def on_off(value, on_text="是", off_text="否"):
     return on_text if int(value) == STATUS_ON else off_text
+
+
+def flash(message=None, kind="success"):
+    """一次性提示：即使后面立刻 st.rerun()，用户也能看到。
+
+    用法：
+        flash()                          # 页面顶部调一次，把上一轮留下的提示显示出来
+        flash("已更新")                  # 操作成功后，代替 st.success
+        flash("操作失败", "error")       # kind 还可用 error / warning / info
+    """
+    if message is not None:
+        st.session_state["_flash"] = (kind, message)
+        return
+    item = st.session_state.pop("_flash", None)
+    if item:
+        kind, msg = item
+        getattr(st, kind)(msg)

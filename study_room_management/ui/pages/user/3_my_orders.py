@@ -8,9 +8,10 @@ import streamlit as st
 from config import ORDER_CANCELLABLE, ORDER_STATUS_NAMES
 from services import order_service
 from services.exceptions import BizError
-from ui.components import area_name, sidebar_user
+from ui.components import flash, area_name, sidebar_user
 
 user = sidebar_user()
+flash()
 if user.get("role") != "user":
     st.error("这页是用户端页面，请用用户账号登录。")
     st.stop()
@@ -64,7 +65,7 @@ target = options[picked]
 if st.button("确认取消", type="secondary"):
     try:
         result = order_service.cancel(target["order_id"], user_id)
-        st.success(f"已取消，单号 {target['order_no']}，退回权益 {result['refund']:.2f} 元")
+        flash(f"已取消，单号 {target['order_no']}，退回权益 {result['refund']:.2f} 元")
         st.caption("时段已释放，可以重新预约同一时段。")
         st.rerun()
     except BizError as e:

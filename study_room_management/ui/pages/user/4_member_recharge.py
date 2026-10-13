@@ -8,9 +8,10 @@ import streamlit as st
 from config import KIND_HOURS, KIND_NAMES, KIND_STORED, KIND_TIMES
 from services import recharge_service
 from services.exceptions import BizError
-from ui.components import kind_name, pay_status_name, sidebar_user
+from ui.components import flash, kind_name, pay_status_name, sidebar_user
 
 user = sidebar_user()
+flash()
 if user.get("role") != "user":
     st.error("这页是用户端页面，请用用户账号登录。")
     st.stop()
@@ -94,7 +95,7 @@ if pending:
             try:
                 result = recharge_service.pay(pending)
                 action = "新开卡" if result["created"] else "累加到已有卡"
-                st.success(
+                flash(
                     f"支付成功！{action} {result['card_no']}，"
                     f"金额 {result['amount']:.2f} 元"
                 )
