@@ -3,7 +3,7 @@
 规范要点：主键 order_id；时段列是 reserve_date / start_time / end_time；
 时长列是 duration（单位分钟）；状态列是 order_status(TINYINT)。
 
-并发安全（★ 关键）：
+并发安全（关键）：
     create() 违反唯一索引 uk_seat_slot 会抛 IntegrityError，
     这是「同一座位同一时段只能有一条有效预约」的**唯一可靠防线**。
     「先查后插」在并发下不可靠，只能用于给用户友好提示。

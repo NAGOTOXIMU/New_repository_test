@@ -148,7 +148,7 @@ CREATE TABLE seat (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='座位信息表';
 
 
--- 6. 用户持卡实例表 user_card（★ 规范缺口补充，核心账务表）
+-- 6. 用户持卡实例表 user_card（规范缺口补充，核心账务表）
 --
 --    card_type 是「卖什么卡」的字典，user_card 是「用户实际持有的那张卡」，
 --    余额 / 剩余次数 / 剩余分钟都挂在 user_card 上，才能按卡归属、按卡扣减。
@@ -180,7 +180,7 @@ CREATE TABLE user_card (
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci COMMENT='用户持卡实例表（账户：余额/次数/时长）';
 
 
--- 7. 预约订单表 reservation_order（★ 核心：座位 × 日期的时段占用）
+-- 7. 预约订单表 reservation_order（核心：座位 × 日期的时段占用）
 --    order_status：1待使用 2进行中 3已完成 4已取消 5已过期
 --    duration 单位：分钟
 --
@@ -207,7 +207,7 @@ CREATE TABLE reservation_order (
   update_time  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                ON UPDATE CURRENT_TIMESTAMP COMMENT '最后修改时间',
   UNIQUE KEY uk_reservation_no (order_no),
-  -- ★ 防重复预约的唯一约束（并发安全的关键）
+  -- 防重复预约的唯一约束（并发安全的关键）
   UNIQUE KEY uk_seat_slot (seat_id, reserve_date, start_time, active_flag),
   KEY idx_res_store_date (store_id, reserve_date, seat_id),
   KEY idx_res_user_status (user_id, order_status),

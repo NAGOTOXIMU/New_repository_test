@@ -11,9 +11,7 @@ from repository import seat_repo, store_repo
 from services.exceptions import BizError
 
 
-# ---------------------------------------------------------------------------
 # 门店
-# ---------------------------------------------------------------------------
 def list_stores():
     """用户端：只返回营业中的门店。"""
     return store_repo.list_all(status=STATUS_ON)
@@ -65,9 +63,7 @@ def set_store_status(store_id, status):
     return store_repo.update_status(store_id, status)
 
 
-# ---------------------------------------------------------------------------
 # 座位
-# ---------------------------------------------------------------------------
 def list_seats(store_id, status=None):
     """某门店的座位，status 传 1 可只看能用的。"""
     return seat_repo.list_by_store(store_id, status)

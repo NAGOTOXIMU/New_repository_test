@@ -10,7 +10,7 @@
 --        执行它会把当前库的索引列出来，方便和下面的期望值逐个对照。
 --        可重复执行、可用 mysql 客户端执行、也可被 db/init_db.py 执行。
 --
---  期望索引（★ = 规范第 12 张图明确要求）
+--  期望索引（标「规范」的是第 12 张图点名的）
 --    store              PRIMARY, uk_store_name, idx_store_status
 --    user               PRIMARY, uk_user_phone
 --    admin              PRIMARY, uk_admin_username, idx_admin_store, idx_admin_status
@@ -18,9 +18,9 @@
 --    seat               PRIMARY, uk_seat_store_code, uk_seat_id_store, idx_seat_store_status
 --    user_card          PRIMARY, uk_card_no, idx_uc_user_type, idx_uc_user_status_expire
 --    reservation_order  PRIMARY, uk_reservation_no,
---                       ★ uk_seat_slot, ★ idx_res_store_date, ★ idx_res_user_status,
+--                       uk_seat_slot（规范）, idx_res_store_date（规范）, idx_res_user_status（规范）,
 --                       idx_res_date_status, idx_res_card
---    recharge_order     PRIMARY, uk_recharge_no, ★ idx_ro_user_status,
+--    recharge_order     PRIMARY, uk_recharge_no, idx_ro_user_status（规范）,
 --                       idx_ro_paytime, idx_ro_card
 
 USE study_room_management;

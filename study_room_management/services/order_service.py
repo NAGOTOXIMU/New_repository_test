@@ -23,9 +23,7 @@ from repository import (card_type_repo, reservation_repo, seat_repo, user_card_r
 from services.exceptions import BizError
 
 
-# ---------------------------------------------------------------------------
 # 时间工具：库里 start_time/end_time 是 TIME，duration 是分钟
-# ---------------------------------------------------------------------------
 def to_minutes(hhmmss) -> int:
     """'14:00:00' -> 840（分钟）。"""
     t = datetime.strptime(str(hhmmss)[:8], "%H:%M:%S")
@@ -56,9 +54,7 @@ def normalize_duration(duration) -> int:
     return duration
 
 
-# ---------------------------------------------------------------------------
 # 选卡与计费
-# ---------------------------------------------------------------------------
 def _pick_card(user_id, card_id=None):
     """选卡：传了 card_id 就用它，没传就自动取第一张可用的。"""
     cards = user_card_repo.list_active_by_user(user_id)
@@ -151,9 +147,7 @@ def _refund(cur, card_id, amount, duration_minutes, user_id):
     user_repo.refresh_summary(cur, user_id)
 
 
-# ---------------------------------------------------------------------------
 # 对外业务
-# ---------------------------------------------------------------------------
 def reserve(user_id, seat_id, reserve_date, start_time, duration, card_id=None,
             store_id=None):
     """预约座位。成功返回 dict，失败抛 BizError。
