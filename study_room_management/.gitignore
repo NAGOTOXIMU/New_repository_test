@@ -9,6 +9,7 @@ ENV/
 
 # 本地数据库密码等敏感配置，绝不进仓库
 .env
+.streamlit/secrets.toml
 
 .vscode/
 

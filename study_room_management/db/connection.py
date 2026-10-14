@@ -2,20 +2,29 @@
 
 一般不用直接调 get_conn()，用下面的 read_cursor() / write_cursor() 即可。
 """
+import os
 from contextlib import contextmanager
 
 import pymysql
+from pymysql.constants import CLIENT
 
 from config import DB_CONFIG
 
+# 连接超时：本地 5 秒够用；连公网库（TiDB Cloud）要留足握手时间
+_CONNECT_TIMEOUT = int(os.getenv("DB_CONNECT_TIMEOUT", "15")) if os.getenv("DB_HOST") else 5
+
 
 def get_conn(autocommit: bool = False):
-    """新建一条连接。DictCursor 让查询结果返回 dict 而不是元组。"""
+    """新建一条连接。DictCursor 让查询结果返回 dict 而不是元组。
+
+    client_flag 带上 MULTI_STATEMENTS，与 db/init_db.py 保持一致。
+    """
     return pymysql.connect(
         **DB_CONFIG,
         autocommit=autocommit,
         cursorclass=pymysql.cursors.DictCursor,
-        connect_timeout=5,      # MySQL 没启动时最多等 5 秒
+        connect_timeout=_CONNECT_TIMEOUT,   # MySQL 没启动时最多等这么久
+        client_flag=CLIENT.MULTI_STATEMENTS,
     )
 
 
