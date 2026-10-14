@@ -3,6 +3,8 @@ import streamlit as st
 
 from config import (AREA_NAMES, KIND_NAMES, MEMBER_LEVEL_NAMES, ORDER_STATUS_NAMES,
                     PAY_STATUS_NAMES, STATUS_ON)
+from services import user_service
+from services.exceptions import BizError
 from ui.theme import brand_html
 
 
@@ -17,6 +19,12 @@ def account_label(user=None):
     """取当前登录人的账号（用户看手机号，管理员看用户名）。"""
     user = user or st.session_state.get("user") or {}
     return user.get("phone") or user.get("username") or ""
+
+
+def _toggle_side_mini():
+    """切换侧边栏展开 / 折叠成 64px 图标条（样式在 ui/theme.css）。"""
+    st.session_state["side_mini"] = not st.session_state.get("side_mini", False)
+    st.rerun()
 
 
 def _user_menu_html(user, is_admin):
@@ -37,18 +45,38 @@ def _user_menu_html(user, is_admin):
 
 
 def sidebar_user():
-    """侧边栏：顶部品牌区 + 底部「头像 + 用户菜单」。返回当前 user dict。
+    """侧边栏：品牌区（含折叠按钮）+ 底部「头像 + 用户菜单」。返回当前 user dict。
 
-    注意：Streamlit 的页面导航由它自己插在侧边栏里，Python 里挪不动，
-    品牌区排到导航上方靠的是 ui/theme.py 里的 flex order，别在这里改顺序。
+    注意：Streamlit 自带的折叠是「整个隐藏」，设计稿要的是缩成 64px 图标条，
+    所以这里把自带按钮藏掉（theme.css），改用 side_mini 这个开关自己做。
+    品牌区排到导航上方靠的是 theme.css 里的 flex order，别在这里改顺序。
     """
     user = st.session_state.get("user") or {}
+    # 充值/扣费只写数据库，session_state 里还是登录那一刻的快照，
+    # 所以每轮都拉一次最新资料，否则侧边栏显示的余额会一直不动
+    if user.get("role") == "user" and user.get("user_id"):
+        try:
+            user = {**user, **user_service.get_profile(user["user_id"])}
+            st.session_state["user"] = user
+        except BizError:
+            pass
     is_admin = user.get("role") == "admin"
+    mini = bool(st.session_state.get("side_mini"))
 
     with st.sidebar:
         with st.container(key="side_brand"):
-            st.markdown(brand_html("自习室", "管理端" if is_admin else "用户端"),
-                        unsafe_allow_html=True)
+            if mini:
+                # 折叠态：只留一个展开按钮（整条侧边栏由 CSS 缩到 64px）
+                st.markdown('<div class="side-mini-flag"></div>', unsafe_allow_html=True)
+                if st.button(">", key="side_mini_btn", width="stretch"):
+                    _toggle_side_mini()
+            else:
+                brand_col, btn_col = st.columns([5, 1], vertical_alignment="center")
+                brand_col.markdown(brand_html("自习室", "管理端" if is_admin else "用户端"),
+                                   unsafe_allow_html=True)
+                with btn_col:
+                    if st.button("<", key="side_mini_btn", width="stretch"):
+                        _toggle_side_mini()
 
         with st.container(key="side_user"):
             with st.popover(display_name(user)):

@@ -48,9 +48,12 @@ def login(phone, password):
     if user["status"] != STATUS_ON:
         raise BizError("账号已被禁用，请联系管理员")
 
-    user.pop("password_hash")     # 哈希值不能传到界面层
-    user["role"] = "user"         # 管理员登录走 admin_service，那里写 "admin"
-    return user
+    # 注意：get_by_phone 只查登录校验要用的列，没有 balance / remaining_hours，
+    # 而界面层（侧边栏、首页）要读余额和剩余时长，所以这里换成完整资料再返回。
+    profile = user_repo.get_by_id(user["user_id"])
+    if profile is None:
+        raise BizError("用户不存在")
+    return {**profile, "role": "user"}   # 与 register() 的返回结构保持一致
 
 
 def get_profile(user_id):

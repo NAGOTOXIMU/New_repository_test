@@ -1,13 +1,14 @@
 /* 全站样式：design-preview 的 v3 设计（notion-pre-ai 配方）落到 Streamlit。
-   这个文件由 ui/theme.py 的 apply() 每次渲染时从磁盘读取 —— 改完刷新浏览器即可，
-   不用重启 Streamlit。
 
-   改样式前先知道两件事：
-   1) 选择器依赖 Streamlit 内部的 data-testid 和 st-key-* 类名。升级 Streamlit 后样式若失效，
-      按 F12 搜这两个名字看是否改名，不要怀疑业务代码。
-   2) 改配色优先改下面的 token，不要在散落的规则里硬编码颜色。 */
+   规则：类名与结构一律照抄设计稿（.page-title / .panel / .pill / .metric / .table-wrap ...），
+   页面代码直接用 st.markdown 渲染同一份 HTML，不再给 Streamlit 原生组件"套皮"。
+   改完刷新浏览器即可，不用重启 Streamlit（本文件是运行时读取的）。
 
-/* ── 设计 token：与原型同一套 ── */
+   只剩两类地方要做 Streamlit 适配（设计稿里没有对应元素）：
+   1) 侧边栏 —— 导航是 Streamlit 自己生成的，只能覆盖它的 data-testid
+   2) 表单控件 —— 输入框/下拉/按钮是 Streamlit 组件，只能用 [data-baseweb] / [data-testid] 改外观 */
+
+/* ── 设计 token：与设计稿同一套 ── */
 :root{
   --ground:#FFFFFF; --cream:#F7F6F3; --cream-deep:#EFEEEB;
   --ink:#37352F; --ink-2:#787774; --ink-3:#9B9A97;
@@ -19,88 +20,174 @@
   --sh-lift:0 2px 8px rgba(15,15,15,.04),0 6px 18px rgba(15,15,15,.07);
   --sh-pop:0 4px 12px rgba(15,15,15,.06),0 16px 40px rgba(15,15,15,.12);
   --ease:cubic-bezier(.22,1,.36,1);
+  --side-w:clamp(64px, 17vw, 300px);   /* 侧边栏宽度：按视口比例，触底 64px 就不再缩 */
 }
 
-/* ── 字体：不引远程字体（避免离线/被墙），用系统栈 ── */
 html, body, button, input, textarea, select{
   font-family:'Inter',-apple-system,'Segoe UI','Microsoft YaHei',sans-serif;
 }
-/* Streamlit 自带的右上角工具栏和右下角运行指示：原型里没有，藏掉 */
-#MainMenu, footer, [data-testid="stToolbar"], [data-testid="stStatusWidget"]{
+/* Streamlit 自带、设计稿里没有的东西：工具栏、运行指示、表单里的英文回车提示 */
+#MainMenu, footer, [data-testid="stToolbar"], [data-testid="stStatusWidget"],
+[data-testid="InputInstructions"]{
   visibility:hidden; display:none;
 }
 
-/* ── 主区：暖灰渐变底 + 内容居中（原型 .main / .main-inner） ── */
+/* ── 主区：暖灰渐变底 + 内容居中 ── */
 [data-testid="stAppViewContainer"]{background:linear-gradient(170deg,#FAF9F7 0%,#F3F2EE 100%)}
 [data-testid="stHeader"]{background:transparent}
 [data-testid="stMainBlockContainer"]{
-  max-width:1120px; margin:0 auto; padding-top:2.6rem; padding-bottom:4rem;
+  max-width:1200px; margin:0 auto; padding:1.5rem 2.5rem 4rem;
 }
 
-/* ── 标题：衬线 + 流式字号。Streamlit 自己给 h1 上了字体，必须 !important 才盖得住 ── */
-h1, h2, h3, [data-testid="stHeading"] h1, [data-testid="stHeading"] h2,
-[data-testid="stHeading"] h3{
-  font-family:Georgia,'Source Serif 4','Songti SC','SimSun',serif !important;
-  font-weight:500; letter-spacing:-.01em; color:var(--ink);
+/* ── 排版（照抄设计稿） ── */
+.serif, .page-title, .login-title, .brand-name{
+  font-family:Georgia,'Source Serif 4','Songti SC','SimSun',serif;
 }
-h1{font-size:clamp(22px,1.4vw+16px,30px)}
-h2{font-size:clamp(18px,1vw+13px,22px)}
+/* Streamlit 的 h1/h2/h3 自带字体，必须 !important 才盖得住 */
+h1, h2, h3{font-family:Georgia,'Source Serif 4','Songti SC','SimSun',serif !important;
+  font-weight:500; letter-spacing:-.01em; color:var(--ink)}
+.page-title{font-size:clamp(22px,1.4vw+16px,30px); font-weight:500;
+  letter-spacing:-.01em; color:var(--ink)}
+.page-sub{font-size:14px; color:var(--ink-2); margin-top:6px; margin-bottom:40px}
 [data-testid="stCaptionContainer"]{color:var(--ink-2)}
 
-/* ── 卡片：st.container(border=True) 是画卡片的标准做法 ── */
-[data-testid="stVerticalBlockBorderWrapper"]:has(> div > [data-testid="stVerticalBlock"]){
-  background:#fff; border:1px solid var(--hair) !important; border-radius:var(--r-lg) !important;
-  padding:24px; box-shadow:var(--sh-rest);
-  transition:transform .22s var(--ease), box-shadow .22s var(--ease);
-}
-[data-testid="stVerticalBlockBorderWrapper"]:hover{transform:translateY(-2px); box-shadow:var(--sh-lift)}
+/* ── 品牌区（设计稿 .brand） ── */
+.brand{display:flex; align-items:center; gap:12px}
+.brand-mark{width:34px; height:34px; flex:0 0 auto; border-radius:var(--r-md);
+  background:var(--ink); display:grid; place-items:center}
+.brand-name{font-size:15px; font-weight:600; letter-spacing:-.01em; color:var(--ink)}
+.brand-sub{font-size:12px; color:var(--ink-3)}
 
-/* ── 指标卡：白底 + 抬升（原型 .metric） ── */
-[data-testid="stMetric"]{
-  background:#fff; border:1px solid var(--hair); border-radius:var(--r-lg);
-  padding:18px 22px; box-shadow:var(--sh-rest); min-width:0;
-  transition:transform .22s var(--ease), box-shadow .22s var(--ease);
-}
-[data-testid="stMetric"]:hover{transform:translateY(-3px); box-shadow:var(--sh-lift)}
-[data-testid="stMetricLabel"] p{font-size:12px !important; color:var(--ink-3) !important}
-[data-testid="stMetricValue"]{font-size:clamp(20px,1.6vw+14px,26px) !important; letter-spacing:-.02em}
+/* ── 面板（设计稿 .panel） ── */
+.panel{background:#fff; border:1px solid var(--hair); border-radius:var(--r-lg); padding:24px;
+  box-shadow:var(--sh-rest); transition:transform .22s var(--ease), box-shadow .22s var(--ease)}
+.panel:hover{transform:translateY(-2px); box-shadow:var(--sh-lift)}
+.panel + .panel{margin-top:24px}
+.panel-head{display:flex; align-items:center; justify-content:space-between; gap:12px;
+  margin-bottom:16px; flex-wrap:wrap}
+.panel-title{font-size:14px; font-weight:500; color:var(--ink)}
+.panel-title .emoji{font-size:17px; margin-right:6px}
 
-/* 指标卡那一行：宽度不够就整列折行，等价原型的 repeat(auto-fit,minmax(175px,1fr))。
-   只对「含指标卡的行」生效 —— 表单和按钮行不能动，否则一行的控件会被拆散、留出大片空白。 */
-[data-testid="stHorizontalBlock"]:has([data-testid="stMetric"]){flex-wrap:wrap}
-[data-testid="stHorizontalBlock"]:has([data-testid="stMetric"]) > [data-testid="stColumn"]{
-  flex:1 1 175px !important; min-width:175px !important;
+/* 用 st.container(key="panel_xxx") 包住 Streamlit 组件时，自动变成同款面板 */
+[class*="st-key-panel_"]{
+  background:#fff; border:1px solid var(--hair); border-radius:var(--r-lg); padding:24px;
+  box-shadow:var(--sh-rest); margin-bottom:8px;   /* 与下一块凑成设计稿的 24px 间距 */
 }
+[class*="st-key-panel_"] + [class*="st-key-panel_"]{margin-top:24px}
 
-/* ── 按钮：主按钮暖黑底白字（原型 .btn-primary） ── */
-[data-testid="stBaseButton-primary"], button[kind="primary"]{
+/* ── 状态标签（设计稿 .pill） ── */
+.pill{display:inline-flex; align-items:center; gap:6px; padding:3px 10px; font-size:12px;
+  font-weight:500; border-radius:var(--r-sm); white-space:nowrap}
+.pill.mint{background:var(--mint); color:var(--mint-ink)}
+.pill.peach{background:var(--peach); color:var(--peach-ink)}
+
+/* ── 指标卡（设计稿 .metrics / .metric，直接用 HTML 渲染，不再用 st.metric） ── */
+.metrics{display:grid; grid-template-columns:repeat(auto-fit,minmax(175px,1fr));
+  gap:16px; margin-bottom:24px}
+.metric{background:#fff; border:1px solid var(--hair); border-radius:var(--r-lg); padding:24px;
+  box-shadow:var(--sh-rest); min-width:0;
+  transition:transform .22s var(--ease), box-shadow .22s var(--ease)}
+.metric:hover{transform:translateY(-3px); box-shadow:var(--sh-lift)}
+.metric-label{font-size:12px; color:var(--ink-3); white-space:nowrap}
+.metric-value{font-size:clamp(20px,1.6vw+14px,26px); font-weight:600; letter-spacing:-.02em;
+  margin-top:8px; line-height:1.2; white-space:nowrap}
+.metric-value small{font-size:14px; color:var(--ink-3); font-weight:400; margin-left:3px}
+
+/* ── 表格（设计稿 table，直接用 HTML 渲染，不再用 st.dataframe） ── */
+.table-wrap{overflow-x:auto; -webkit-overflow-scrolling:touch; margin:0 -4px; padding:0 4px}
+/* 注意：Streamlit 对 markdown 里的 table 有自带样式，特异性比 .table-wrap table 高，
+   这里必须带上容器选择器 + !important 才压得住（踩过的坑）。 */
+[data-testid="stMarkdownContainer"] table{width:100%; border-collapse:collapse;
+  font-size:14px; min-width:460px}
+[data-testid="stMarkdownContainer"] table th{
+  text-align:left !important; font-size:12px !important; font-weight:500 !important;
+  color:var(--ink-3) !important; padding:0 16px 10px !important;
+  border-bottom:1px solid var(--hair) !important; border-top:0 !important; white-space:nowrap}
+[data-testid="stMarkdownContainer"] table td{
+  padding:12px 16px !important; border-bottom:1px solid var(--hair) !important;
+  color:var(--ink-2) !important; white-space:nowrap}
+[data-testid="stMarkdownContainer"] tbody tr:last-child td{border-bottom:0 !important}
+[data-testid="stMarkdownContainer"] tbody tr:hover{background:var(--cream)}
+td.code{font-family:'JetBrains Mono',Consolas,monospace; font-size:13px; color:var(--ink)}
+
+/* ── 表单控件（Streamlit 组件，只能改外观） ── */
+/* 输入框：加底色 + 发丝线，让它从白面板里区分出来；聚焦时变白，强调「正在输入」。
+   坑：Streamlit 1.65 的输入框换成了 react-aria 组件，老的 `[data-baseweb="input"]`
+   选择器已经不命中任何元素（样式会静默失效），必须用下面这些 testid / 类名。 */
+[data-testid="stTextInputRootElement"],
+[data-testid="stNumberInputContainer"],
+[data-testid="stTextAreaRootElement"],
+[data-testid="stSelectbox"] .react-aria-ComboBox > div,
+[data-testid="stDateInput"] .react-aria-DateField > div,
+[data-testid="stTimeInput"] .react-aria-TimeField > div{
+  background:var(--cream) !important;
+  border:1px solid var(--hair-deep) !important;
+  border-radius:var(--r-md) !important;
+}
+[data-testid="stTextInputRootElement"]:focus-within,
+[data-testid="stNumberInputContainer"]:focus-within,
+[data-testid="stSelectbox"] .react-aria-ComboBox > div:focus-within{
+  background:#fff !important;
+  border-color:var(--ink) !important;
+  box-shadow:0 0 0 3px rgba(55,53,47,.08) !important;
+}
+/* 设计稿的控件标签是 13px 灰字 */
+[data-testid="stWidgetLabel"] p{font-size:13px !important; font-weight:500; color:var(--ink-2)}
+[data-testid="stBaseButton-primary"], [data-testid="stBaseButton-primaryFormSubmit"],
+button[kind="primary"], button[kind="primaryFormSubmit"]{
   background:var(--ink); color:#fff; border:1px solid transparent; border-radius:var(--r-md);
 }
-[data-testid="stBaseButton-primary"]:hover, button[kind="primary"]:hover{
+[data-testid="stBaseButton-primary"]:hover, [data-testid="stBaseButton-primaryFormSubmit"]:hover,
+button[kind="primary"]:hover, button[kind="primaryFormSubmit"]:hover{
   background:var(--ink); color:#fff; transform:translateY(-2px); box-shadow:var(--sh-lift);
 }
 [data-testid="stBaseButton-secondary"], button[kind="secondary"]{
   border-radius:var(--r-md); border-color:var(--hair-deep); color:var(--ink);
 }
-
-/* ── 输入框 / 下拉：圆角 + 发丝线 + 聚焦描边（原型 .field） ── */
-[data-baseweb="input"], [data-baseweb="select"] > div, [data-baseweb="textarea"]{
-  border-radius:var(--r-md) !important; border-color:var(--hair-deep) !important;
-  background:#fff;
+/* 卡片底部的文字链接（设计稿 .login-alt a）做成无边框按钮 */
+[data-testid="stBaseButton-tertiary"], button[kind="tertiary"]{
+  color:var(--link); font-size:13px; font-weight:500; border:0; background:none;
+  padding:2px 4px; min-height:0;
 }
-[data-baseweb="input"]:focus-within, [data-baseweb="select"] > div:focus-within{
-  border-color:var(--ink) !important; box-shadow:0 0 0 3px rgba(55,53,47,.08) !important;
+[data-testid="stBaseButton-tertiary"]:hover, button[kind="tertiary"]:hover{
+  color:var(--link); text-decoration:underline; background:none;
 }
+[data-testid="stAlert"]{border-radius:var(--r-md)}
+[data-testid="stForm"]{border:0; padding:0}
 
-/* ── 表格：圆角 + 发丝线 ── */
-[data-testid="stDataFrame"], [data-testid="stDataFrameResizable"]{
-  border:1px solid var(--hair); border-radius:var(--r-md); overflow:hidden;
-}
-
-/* ── 侧边栏：奶油色 + 发丝线（原型 .side） ── */
+/* ── 侧边栏（Streamlit 生成，只能覆盖） ── */
+/* 侧边栏宽度：按视口比例缩放（稿子写的是「占屏 14–18%」），上限 300px，
+   触底 64px 就不再缩 —— 就是「最基本的窄侧边栏」 */
 [data-testid="stSidebar"]{
+  width:var(--side-w) !important;
+  min-width:var(--side-w) !important;
+  /* Streamlit 会在窄屏把侧边栏改成浮层（主区从 x=0 被压住），下面用 margin 给主区补等宽占位 */
+  position:relative !important; transform:none !important;
   background:var(--cream); border-right:1px solid var(--hair);
 }
+
+/* Streamlit 会在窗口变窄时自己把侧边栏折叠掉（把 section 的 aria-expanded 设成 false），
+   设计稿里没有这个行为 —— 折叠只应该由我们那个 « 按钮控制，所以这里强制压回来。 */
+section[data-testid="stSidebar"][aria-expanded="false"]{
+  margin-left:0 !important; transform:none !important;
+  visibility:visible !important; opacity:1 !important; display:block !important;
+}
+
+/* 折叠成 64px 图标条（设计稿的 .app.mini）。
+   Streamlit 自带的折叠只能「整个隐藏」、样式也改不动，所以藏掉它，
+   改用 components.sidebar_user 里的 « 按钮 + .side-mini-flag 标记来控制。 */
+[data-testid="stSidebarCollapseButton"]{display:none}
+[data-testid="stSidebar"]:has(.side-mini-flag){width:64px !important; min-width:64px !important}
+[data-testid="stSidebar"]:has(.side-mini-flag) [data-testid="stSidebarContent"]{padding:16px 8px}
+[data-testid="stSidebar"]:has(.side-mini-flag) .brand-name,
+[data-testid="stSidebar"]:has(.side-mini-flag) .brand-sub,
+[data-testid="stSidebar"]:has(.side-mini-flag) [data-testid="stSidebarNavLink"] span[label],
+[data-testid="stSidebar"]:has(.side-mini-flag) .st-key-side_user button p,
+[data-testid="stSidebar"]:has(.side-mini-flag) .st-key-side_user button span{display:none}
+[data-testid="stSidebar"]:has(.side-mini-flag) [data-testid="stSidebarNavLink"]{
+  justify-content:center; padding:10px 0}
+[data-testid="stSidebar"]:has(.side-mini-flag) .st-key-side_user button{
+  justify-content:center; padding:6px 0}
 [data-testid="stSidebar"] [data-testid="stSidebarNav"] a{
   border-radius:var(--r-md); transition:background .22s var(--ease), color .22s var(--ease);
 }
@@ -108,22 +195,34 @@ h2{font-size:clamp(18px,1vw+13px,22px)}
 [data-testid="stSidebar"] [data-testid="stSidebarNav"] a[aria-current="page"]{
   background:rgba(35,131,226,.09); color:var(--ink); font-weight:500;
 }
-
-/* ── 侧边栏内部顺序 ──
-   坑：品牌区和用户区都被 Streamlit 塞进 stSidebarUserContent（一个排在导航之后的容器），
-   Python 里挪不动。中间几层「壳」用 display:contents 拆掉，让两块变成侧边栏的直接子项，
-   再靠 flex order 排成「品牌 → 导航 → 用户区(贴底)」。 */
-[data-testid="stSidebarContent"]{display:flex; flex-direction:column; min-height:100%}
+/* 侧边栏内部顺序：品牌区排到导航上方、用户区贴底。
+   设计稿里这三块是我自己写的，Streamlit 却把它们全塞进 stSidebarUserContent（排在导航之后），
+   所以用 display:contents 拆掉中间几层壳，再靠 flex order 重排。 */
+[data-testid="stSidebarContent"]{display:flex; flex-direction:column; min-height:100%;
+  padding:16px 12px}
 [data-testid="stSidebarUserContent"],
 [data-testid="stSidebarUserContent"] > div,
 [data-testid="stSidebarUserContent"] > div > [data-testid="stVerticalBlock"],
 [data-testid="stSidebarUserContent"] [data-testid="stLayoutWrapper"]{display:contents}
-[data-testid="stSidebarHeader"]{order:0}
-.st-key-side_brand{order:1; padding:0 4px 14px; border-bottom:1px solid var(--hair)}
-[data-testid="stSidebarNav"]{order:2; margin-top:10px}
-.st-key-side_user{order:3; margin-top:auto; border-top:1px solid var(--hair); padding-top:10px}
+[data-testid="stSidebarHeader"]{order:0; flex:0 0 auto}
+.st-key-side_brand{order:1; flex:0 0 auto; align-self:flex-start; width:100%;
+  padding:0 4px 14px; border-bottom:1px solid var(--hair)}
+/* 品牌区右侧的折叠按钮：稿子里的 .icon-btn —— 32×32 白底方块，符号 15px 居中 */
+.st-key-side_brand [data-testid="stBaseButton-secondary"]{
+  width:32px; height:32px; min-height:32px; padding:0;
+  display:flex; align-items:center; justify-content:center;
+  background:#fff; border:1px solid var(--hair); border-radius:var(--r-md);
+  color:var(--ink-3); box-shadow:none;
+}
+.st-key-side_brand [data-testid="stBaseButton-secondary"] p{
+  font-size:15px; line-height:1; font-weight:400}
+.st-key-side_brand [data-testid="stBaseButton-secondary"]:hover{
+  color:var(--ink); border-color:var(--hair-deep); box-shadow:var(--sh-rest)}
+[data-testid="stSidebarNav"]{order:2; flex:0 0 auto; margin-top:10px}
+.st-key-side_user{order:3; flex:0 0 auto; margin-top:auto;
+  border-top:1px solid var(--hair); padding-top:10px}
 
-/* ── 侧边栏用户菜单：整行一个按钮，左侧圆形头像（::before 画，不用图片） ── */
+/* 侧边栏用户菜单：整行一个按钮，左侧圆形头像（::before 画，不用图片） */
 .st-key-side_user [data-testid="stPopover"], .st-key-side_user [data-testid="stPopover"] > div{width:100%}
 .st-key-side_user [data-testid="stPopover"] button{
   width:100%; justify-content:flex-start; gap:10px; padding:6px 8px;
@@ -135,41 +234,53 @@ h2{font-size:clamp(18px,1vw+13px,22px)}
   content:''; width:28px; height:28px; flex:0 0 auto; border-radius:50%;
   background:linear-gradient(145deg,#5E6AD2,#4A54B8);
 }
-
-/* ── 侧边栏品牌区（ui/theme.py 的 brand_html 生成的 HTML） ── */
-.side-brand{display:flex; align-items:center; gap:10px}
-.side-brand .mark{width:32px; height:32px; flex:0 0 auto; border-radius:var(--r-md);
-  background:var(--ink); display:grid; place-items:center}
-.side-brand .name{font-size:14.5px; font-weight:600; letter-spacing:-.01em; color:var(--ink)}
-.side-brand .sub{font-size:12px; color:var(--ink-3)}
-
-/* ── 用户弹出菜单里的信息块 ── */
 .user-menu-txt{font-size:13px; color:var(--ink-2); line-height:1.7}
 .user-menu-txt .mono{font-family:'JetBrains Mono',Consolas,monospace; color:var(--ink)}
 
-/* ── 登录页：居中卡片（原型 .login-card） ── */
-.st-key-login_card{
+/* ── 登录卡片（设计稿 .login-card） ── */
+[class*="st-key-login_card"]{
   max-width:400px; margin:6vh auto 0; background:#fff; border:1px solid var(--hair);
   border-radius:var(--r-lg); padding:40px 40px 24px; box-shadow:var(--sh-rest);
 }
-.login-brand{display:flex; align-items:center; gap:12px; margin-bottom:36px}
-.login-brand .mark{width:34px; height:34px; flex:0 0 auto; border-radius:var(--r-md);
-  background:var(--ink); display:grid; place-items:center}
-.login-brand .name{font-size:15px; font-weight:600; color:var(--ink)}
-.login-brand .sub{font-size:12px; color:var(--ink-3)}
-.login-title{font-family:Georgia,'Source Serif 4','Songti SC',serif; font-size:clamp(24px,3vw,30px);
-  font-weight:500; letter-spacing:-.01em; color:var(--ink); margin-bottom:4px}
-.login-desc{font-size:14px; color:var(--ink-2); margin-bottom:28px}
+.login-card .brand, [class*="st-key-login_card"] .brand{margin-bottom:40px}
+.login-title{font-size:clamp(24px,3vw,30px); font-weight:500; letter-spacing:-.01em;
+  color:var(--ink); line-height:1.25}
+.login-desc{font-size:14px; color:var(--ink-2); margin-top:6px; margin-bottom:32px}
+/* 卡片底部链接区（设计稿 .login-alt：上边框分隔 + 两行各自整体居中） */
+.login-alt{margin-top:40px; padding-top:24px; border-top:1px solid var(--hair);
+  display:flex; flex-direction:column; gap:10px; align-items:center}
+.login-alt p{font-size:13px; color:var(--ink-2); margin:0}
+.login-alt a{color:var(--link); text-decoration:none; font-weight:500}
+.login-alt a:hover{text-decoration:underline}
+.login-alt .sep{color:var(--hair-deep); margin:0 6px}
 
-/* ── 提示条：统一的圆角 ── */
-[data-testid="stAlert"]{border-radius:var(--r-md)}
-
-/* ── 响应式 ── */
-@media (max-width:899px){
-  [data-testid="stMainBlockContainer"]{padding-top:1.6rem}
+/* ── 响应式 ──
+   侧边栏宽度已由上面的 --side-w（clamp 按比例）控制，这里只管两件事：
+   ① 窄屏 Streamlit 把侧边栏变浮层时，给主区补等宽占位（实测 768px 以下会浮层）
+   ② 什么时候切「图标条」形态（阈值 1059px：侧边栏 < 180px 文字排不下，180/0.17≈1059） */
+@media (max-width:767px){
+  [data-testid="stMain"]{margin-left:var(--side-w) !important;
+    width:calc(100% - var(--side-w)) !important}
 }
-@media (max-width:640px){
-  [data-testid="stMainBlockContainer"]{padding-left:1rem; padding-right:1rem}
-  [data-testid="stMetric"]{padding:14px 16px}
-  .st-key-login_card{padding:28px 24px 20px; margin-top:2vh}
+@media (max-width:1059px){
+  /* Streamlit 在窄屏会把侧边栏变成浮层（主区从 x=0 被压住），强制它回到文档流自己占位 */
+  [data-testid="stSidebar"]{position:relative !important; transform:none !important}
+  [data-testid="stSidebar"] [data-testid="stSidebarNavLink"]{justify-content:center; padding:10px 0}
+  [data-testid="stSidebar"] .brand-name,
+  [data-testid="stSidebar"] .brand-sub,
+  [data-testid="stSidebar"] [data-testid="stSidebarNavLink"] span[label],
+  [data-testid="stSidebar"] .st-key-side_user button p,
+  [data-testid="stSidebar"] .st-key-side_user button span{display:none}
+  /* 这个区间侧边栏本身就是图标条，手动折叠按钮没意义（稿子在这里也隐藏它） */
+  [data-testid="stSidebar"] .st-key-side_brand [data-testid="stHorizontalBlock"]{display:none}
+  [data-testid="stMainBlockContainer"]{padding-left:1.5rem; padding-right:1.5rem}
+}
+/* 手机区间：按你的要求固定成 64px 图标条，不再按比例继续缩 */
+@media (max-width:639px){
+  :root{--side-w:64px}
+  [data-testid="stSidebar"] [data-testid="stSidebarContent"]{padding:16px 8px}
+  [data-testid="stMainBlockContainer"]{padding-left:1rem; padding-right:1rem; padding-top:1.6rem}
+  .metric{padding:18px}
+  .panel{padding:18px}
+  [class*="st-key-login_card"]{padding:28px 24px 20px; margin-top:2vh}
 }

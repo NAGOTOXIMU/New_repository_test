@@ -1,12 +1,12 @@
 """全站样式的入口：把 design-preview 的 v3 设计注入 Streamlit。
 
-CSS 本体在同目录的 theme.css。特意拆成 .css 文件：Streamlit 不会重新加载已经导入过的
-.py 模块，改 .py 里的样式字符串必须重启进程才生效；而 apply() 每次都从磁盘读 .css，
-所以改完样式只要刷新浏览器就能看到。
+CSS 本体在同目录的 theme.css，类名与设计稿完全一致（.page-title / .panel / .pill / .metric
+/ .table-wrap ...），所以页面代码可以直接照抄设计稿的 HTML 结构。
 
-用法：在入口 app.py 里调用一次 apply()。
-注意：每次 rerun（页面切换 / 点按钮）DOM 都会重建，CSS 必须每轮重新注入，
-所以别用 session_state 做「只注入一次」的去重。
+分成 .css 文件是为了改样式不用重启：Streamlit 不会重新加载已经 import 过的 .py 模块，
+而 apply() 每次都从磁盘读 .css，改完刷新浏览器就生效。
+
+用法：在入口 app.py 里调用一次 apply()。每轮 rerun 都要重新注入，不要做去重。
 """
 from pathlib import Path
 
@@ -14,7 +14,7 @@ import streamlit as st
 
 _CSS_PATH = Path(__file__).with_name("theme.css")
 
-# 品牌 mark：一本翻开的书（与原型一致，避免用三条杠那种「汉堡菜单」符号）
+# 设计稿里的品牌 mark：一本翻开的书（不是三条杠那种「汉堡菜单」符号）
 BOOK_SVG = (
     '<svg width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="#fff" '
     'stroke-width="1.8" stroke-linecap="round" stroke-linejoin="round">'
@@ -23,13 +23,11 @@ BOOK_SVG = (
 )
 
 
-def brand_html(name="自习室预约系统", sub="Study Room Booking", cls="side-brand"):
-    """品牌区 HTML。cls 用 side-brand（侧边栏）或 login-brand（登录卡片）。"""
+def brand_html(name="自习室预约系统", sub="Study Room Booking"):
+    """设计稿的 .brand 结构，登录卡片和侧边栏共用。"""
     return (
-        f'<div class="{cls}">'
-        f'<div class="mark">{BOOK_SVG}</div>'
-        f'<div><div class="name">{name}</div><div class="sub">{sub}</div></div>'
-        f'</div>'
+        f'<div class="brand"><div class="brand-mark">{BOOK_SVG}</div>'
+        f'<div><div class="brand-name">{name}</div><div class="brand-sub">{sub}</div></div></div>'
     )
 
 
