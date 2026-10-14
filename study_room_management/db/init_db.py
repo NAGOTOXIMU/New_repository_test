@@ -19,7 +19,17 @@
     01_schema.sql 是先 DROP 再 CREATE，会把数据清空；
     --migrate 只对**已有数据的库**做结构升级（例如换 uk_seat_slot 唯一键），
     不清数据。已经建过库的机器升级代码后必须跑它，否则库结构还是旧的。
+
+🌐 云端部署（Streamlit Cloud + 公网 MySQL）：
+    设了 DB_HOST 环境变量 = 云端模式。此时：
+      · 脚本里的 CREATE DATABASE / USE 会被自动剔掉（云端实例通常不允许），
+        改为在连接时用 database= 参数指定目标库；
+      · 目标库不存在会尝试自动建一次，失败则给出手工建库指引。
+    连接信息来源（按优先级）：环境变量 → st.secrets → `.streamlit/secrets.toml`
+    → 项目根目录 `.env`。所以在本地也能先写好 secrets.toml 再初始化云库。
 """
+import os
+import re
 import sys
 from pathlib import Path
 
@@ -35,6 +45,13 @@ BUILD_FILES = ["01_schema.sql", "02_indexes.sql", "03_seed.sql"]
 # 结构迁移脚本（只改结构，不清数据；每次改表都要在这里登记并新加一个 0N 文件）
 MIGRATE_FILES = ["04_migrate_uk_seat_slot.sql"]
 
+# 云端库（TiDB Cloud 等）通常不允许 CREATE DATABASE，也无法在这个脚本里
+# 用「先连服务器、再 USE 新建库」的流程。所以连云端时把「建库/切库/删库」
+# 三类语句从脚本里剔掉，改为在建立连接时直接用 database= 参数指定目标库。
+_DB_LEVEL_STMT = re.compile(
+    r"(?im)^\s*(CREATE\s+DATABASE|CREATE\s+SCHEMA|USE\s+|DROP\s+DATABASE|DROP\s+SCHEMA)\b[^;]*;?"
+)
+
 
 def _has_real_sql(text: str) -> bool:
     """文件里是否有真正的 SQL 语句（忽略注释行和空行）。"""
@@ -45,13 +62,26 @@ def _has_real_sql(text: str) -> bool:
     return False
 
 
+def is_remote() -> bool:
+    """按 config.py 的同一口径判断当前是不是连公网库。"""
+    return bool(os.getenv("DB_HOST"))
+
+
+def _strip_db_level_statements(sql: str) -> str:
+    """去掉建库/切库/删库语句（云端不允许；库由连接参数指定）。"""
+    return _DB_LEVEL_STMT.sub("", sql)
+
+
 def _run_sql_file(conn, path: Path) -> int:
     """执行一个 .sql 文件。返回最后一条语句的结果行数（SELECT 才有意义）。
 
     ⚠️ 只能用 PyMySQL 能解析的 SQL：不支持 mysql 客户端的 DELIMITER、
        SOURCE 等命令。需要多条语句时用分号分隔并开启 MULTI_STATEMENTS。
+    连云端库时，建库/切库语句会被自动剔掉（见 _strip_db_level_statements）。
     """
     sql = path.read_text(encoding="utf-8")
+    if is_remote():
+        sql = _strip_db_level_statements(sql)
     rows = 0
     with conn.cursor() as cur:
         cur.execute(sql)
@@ -99,20 +129,52 @@ def main() -> int:
             print("已取消，什么都没做。")
             return 0
 
-    # 建库阶段不能带 database 参数，否则连不上还不存在的库
+    # 本地：不带 database 直连服务器（库可能还不存在，脚本自己会建）
+    # 云端：目标库必须可用，因为建库/切库语句已被剔除。库不存在时
+    #       尝试自动创建一次，不给就给出明确的手工建库指引。
     cfg = dict(DB_CONFIG)
-    cfg.pop("database", None)
+    remote = is_remote()
+    if not remote:
+        cfg.pop("database", None)
     cfg["client_flag"] = CLIENT.MULTI_STATEMENTS
     cfg["autocommit"] = True
     cfg["cursorclass"] = pymysql.cursors.DictCursor   # DB_CONFIG 里没带这一项，补上
 
+    print(f"模式：{'云端库' if remote else '本地库'}（{cfg['host']}）")
     print(f"目标 MySQL：{cfg['host']}:{cfg['port']}  用户 {cfg['user']}  目标库 {db_name}")
     try:
         conn = pymysql.connect(**cfg)
     except Exception as e:
-        print(f"\n连不上 MySQL：{e}")
-        print("请检查：.env 里的 DB_PASSWORD 是否正确 / MySQL 服务是否已启动")
-        return 1
+        errno = e.args[0] if e.args else None
+        if remote and errno == 1049:
+            # Unknown database —— 云端实例上还没建这个库
+            print(f"\n云端实例上没有 `{db_name}` 库，尝试自动创建……")
+            server_cfg = {k: v for k, v in cfg.items() if k != "database"}
+            try:
+                tmp = pymysql.connect(**server_cfg)
+                with tmp.cursor() as cur:
+                    cur.execute(
+                        f"CREATE DATABASE IF NOT EXISTS `{db_name}` "
+                        "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci")
+                tmp.close()
+                print(f"已创建 `{db_name}`，重新连接……")
+                conn = pymysql.connect(**cfg)
+            except Exception as e2:
+                print(f"\n自动建库失败：{e2}")
+                print("请在云控制台（TiDB Cloud → SQL Editor）执行下面一句，"
+                      "然后重新运行本命令：")
+                print(f"    CREATE DATABASE `{db_name}` "
+                      "CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;")
+                return 1
+        else:
+            print(f"\n连不上 MySQL：{e}")
+            if remote:
+                print("请检查：DB_HOST/DB_PORT/DB_USER/DB_PASSWORD/DB_NAME 是否正确、"
+                      "实例是否处于可用状态（空闲实例可能被暂停，去控制台唤醒），"
+                      "以及是否已把本机 IP 加入实例的访问白名单")
+            else:
+                print("请检查：.env 里的 DB_PASSWORD 是否正确 / MySQL 服务是否已启动")
+            return 1
 
     try:
         if only_migrate:
@@ -129,7 +191,8 @@ def main() -> int:
 
         # 建完自检：列出所有表 + 关键约束统计
         with conn.cursor() as cur:
-            cur.execute(f"USE `{db_name}`")
+            if not remote:
+                cur.execute(f"USE `{db_name}`")
             cur.execute("SHOW TABLES")
             tables = [list(row.values())[0] for row in cur.fetchall()]
 
