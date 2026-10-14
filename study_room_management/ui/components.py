@@ -1,11 +1,17 @@
 """通用 UI 组件：身份信息、权限断言、状态名映射、侧边栏。"""
+import time
+
 import streamlit as st
 
 from config import (AREA_NAMES, KIND_NAMES, MEMBER_LEVEL_NAMES, ORDER_STATUS_NAMES,
                     PAY_STATUS_NAMES, STATUS_ON)
-from services import user_service
+from services import order_service, user_service
 from services.exceptions import BizError
 from ui.theme import brand_html
+
+# 时间驱动状态流转的节流间隔（秒）。Streamlit 每点一下都重跑整个脚本，
+# 不节流的话每个按钮点击都会写一次数据库。
+_SYNC_INTERVAL_SECONDS = 60
 
 
 def display_name(user=None):
@@ -117,6 +123,34 @@ def area_name(value):
 
 def on_off(value, on_text="是", off_text="否"):
     return on_text if int(value) == STATUS_ON else off_text
+
+
+def sync_time_status_once():
+    """打开页面时推一把订单状态，60 秒内只做一次。
+
+    放在需要看到准确订单状态的页面第一行调用（用户端首页/我的订单、
+    管理端订单管理/看板）。做「时间驱动」的状态流转：到点了「待使用」
+    自动变「进行中」，时段过了自动变「已完成」。
+
+    为什么用 session_state 计时而不是常驻定时任务：
+        本项目是 Streamlit 单进程，没有 apscheduler 之类的调度器，
+        进程只在有人访问时活着。所以采用「访问即同步 + 节流」，
+        零新增依赖，也不需要额外跑一个后台进程。
+        代价：完全没人访问的时段不会立刻更新状态 —— 但订单状态是
+        「打开页面时算出来的」，没人看就没人受影响，而且下一次有人
+        打开时会一次性补上（SQL 是按当前时间算的，不依赖历史调用）。
+
+    数据库连不上时静默跳过，不能让首页因为同步失败而白屏。
+    """
+    last = st.session_state.get("_sync_ts", 0)
+    now = time.time()
+    if now - last < _SYNC_INTERVAL_SECONDS:
+        return None
+    st.session_state["_sync_ts"] = now
+    try:
+        return order_service.sync_time_status()
+    except Exception:
+        return None
 
 
 def flash(message=None, kind="success"):

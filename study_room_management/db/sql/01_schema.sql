@@ -18,6 +18,9 @@
 --      但只靠「先查再插」在并发下无法原子；必须由数据库唯一索引兜底。
 --      取消预约时把 active_flag 置为 NULL，MySQL 唯一索引允许多个 NULL，
 --      于是该时段被真正释放，用户可以重新预约。
+--      ⚠️ V1.1 起唯一键补上了 end_time，并且业务层还加了座位级互斥锁，
+--         原因和升级步骤见 db/sql/04_migrate_uk_seat_slot.sql。
+--         已经建过库的机器必须执行那个迁移脚本，否则仍然是旧键。
 --
 --  维护者：全组公共依赖 —— 改表前必须在群里说，由一个人统一改，改完同步所有人
 
@@ -185,7 +188,13 @@ CREATE TABLE user_card (
 --    duration 单位：分钟
 --
 --    防重复预约靠 uk_seat_slot：
---      同一座位 + 同一日期 + 同一开始时间，最多只能有一条「有效」预约。
+--      同一座位 + 同一日期 + 同一开始时间 + 同一结束时间，最多只能有一条「有效」预约。
+--      ⚠️ 唯一索引只能精确去重，挡不住「部分重叠」（09:00~11:00 与 10:00~12:00
+--         开始时间不同，唯一键判不出冲突）。所以真正防重叠有两道：
+--         ① 服务层：order_service.reserve() 先取座位级咨询锁（GET_LOCK），
+--            再查重叠，查完才插入 —— 同座位同时段的下单被串行化，见
+--            repository/reservation_repo.lock_seat_slot() + seat_repo.has_active_reservation()
+--         ② 数据库层：uk_seat_slot 兜底完全相同的时段（含客户端的重复提交）
 --    取消时把 active_flag 置为 NULL —— MySQL 唯一索引允许多个 NULL，
 --    于是「已取消」的记录不再占用时段，用户还能重新预约同一时段。
 --    （普通方案做不到：改成 order_status=4 后唯一键仍被占住。）
@@ -207,11 +216,15 @@ CREATE TABLE reservation_order (
   update_time  DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP
                ON UPDATE CURRENT_TIMESTAMP COMMENT '最后修改时间',
   UNIQUE KEY uk_reservation_no (order_no),
-  -- 防重复预约的唯一约束（并发安全的关键）
-  UNIQUE KEY uk_seat_slot (seat_id, reserve_date, start_time, active_flag),
+  -- 防重复预约的唯一约束（并发安全的兜底防线；end_time 必须一起进键，
+  -- 否则「同座位同开始时间但时长不同」的两条预约会被当成同一条而互相挡住）
+  UNIQUE KEY uk_seat_slot (seat_id, reserve_date, start_time, end_time, active_flag),
   KEY idx_res_store_date (store_id, reserve_date, seat_id),
   KEY idx_res_user_status (user_id, order_status),
-  KEY idx_res_date_status (reserve_date, order_status),
+  -- 状态自动流转要按「日期 + 状态 + 开始时间」扫，见 reservation_repo.sync_time_status()。
+  -- 列顺序取 (reserve_date, order_status, start_time)：前缀 (reserve_date, order_status)
+  -- 正好覆盖原来 idx_res_date_status 的用法，所以两个索引合并成了一个。
+  KEY idx_res_date_status (reserve_date, order_status, start_time),
   KEY idx_res_card (card_id),
   CONSTRAINT fk_res_user  FOREIGN KEY (user_id) REFERENCES `user`(user_id)
     ON DELETE RESTRICT ON UPDATE CASCADE,

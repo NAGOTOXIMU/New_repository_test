@@ -119,6 +119,9 @@ def expire_overdue(cur=None):
     """把「已过预约日期且仍未使用」的订单标成已过期(5)，并释放时段。
 
     返回被更新的行数。建议由管理端或定时任务调用。
+
+    注意：当天已经过去的时段不在这里处理，而在 sync_time_status() 里置「已完成(3)」，
+    因为日期还没过，叫「已过期」不合适。
     """
     sql = ("UPDATE reservation_order SET order_status = %s, active_flag = NULL "
            "WHERE order_status IN (%s, %s) AND reserve_date < CURDATE()")
@@ -129,6 +132,85 @@ def expire_overdue(cur=None):
     with write_cursor() as c:
         c.execute(sql, args)
         return c.rowcount
+
+
+def sync_time_status(cur=None):
+    """按「当前时间」把预约状态往前推，返回 (变成进行中的条数, 变成已完成的条数)。
+
+    解决「到了预约时间，订单还停在待使用」的问题：以前只有管理员手工点签到
+    才会变「进行中」（见 docs/DESIGN.md 的 A1），现在由这个函数按时间自动推。
+    全站多处会调用它（用户端和管理端页面每次打开时调一次），所以必须满足：
+
+      1) 幂等：靠 WHERE 里的状态条件，同一秒调 100 次结果一样；
+      2) 只动该动的行：日期不对、状态不对、已取消/已完成的一律不碰；
+      3) 两条 UPDATE 都是单语句原子操作，不需要外层事务。
+
+    口径（必须和 config.ORDER_* 一致）：
+      * 待使用(1) → 进行中(2)：现在处在 [start_time, end_time) 之间
+        这代表「人已经到店、时段开始了」，签到不再需要管理员手工点。
+      * 待使用(1)/进行中(2) → 已完成(3)：当天的预约且当前时间已经 >= end_time。
+        用「已完成」而不是「已过期」，是因为日期还没过（日期过了的交给 expire_overdue）。
+      * active_flag 保持不动：已完成的时段仍要占着，否则同一时段能被重复约。
+
+    注意：不要把这里改成「置 NULL 释放时段」——释放时段只应发生在
+    「取消」和「日期已过」两种情况，否则历史预约就挡不住重复预约了。
+    """
+    started_sql = (
+        "UPDATE reservation_order SET order_status = %s "
+        "WHERE order_status = %s AND reserve_date = CURDATE() "
+        "  AND start_time <= CURTIME() AND CURTIME() < end_time"
+    )
+    finished_sql = (
+        "UPDATE reservation_order SET order_status = %s "
+        "WHERE order_status IN (%s, %s) AND reserve_date = CURDATE() "
+        "  AND CURTIME() >= end_time"
+    )
+    started_args = (ORDER_ONGOING, ORDER_PENDING)
+    finished_args = (ORDER_DONE, ORDER_PENDING, ORDER_ONGOING)
+
+    if cur is not None:
+        cur.execute(started_sql, started_args)
+        started = cur.rowcount
+        cur.execute(finished_sql, finished_args)
+        return started, cur.rowcount
+    with write_cursor() as c:
+        c.execute(started_sql, started_args)
+        started = c.rowcount
+        c.execute(finished_sql, finished_args)
+        return started, c.rowcount
+
+
+def lock_seat_slot(seat_id, cur, timeout_seconds=5):
+    """取「这个座位」的互斥锁，返回 True/False（False = 等超时，别人正在下单）。
+
+    为什么需要它：唯一索引只能挡住「完全相同」的时段，挡不住部分重叠
+    （09:00~11:00 与 10:00~12:00 开始时间不同，唯一键判不出来）。
+    所以在「查有没有冲突」和「插入」之间必须把同一个座位串行化，
+    否则两个人同时提交就能同时通过检查、双双插入。
+
+    实现用 MySQL 的咨询锁 GET_LOCK：
+      * 它是连接级、不参与事务的锁，必须显式 RELEASE_LOCK（见 unlock_seat_slot）；
+      * 锁名字里带 seat_id，所以不同座位互不影响，不会拖慢整体；
+      * 调用方必须保证「先锁卡、再锁座位」的固定顺序，避免两张表交叉死锁。
+    """
+    cur.execute("SELECT GET_LOCK(%s, %s) AS got", (_seat_lock_name(seat_id), timeout_seconds))
+    row = cur.fetchone()
+    return bool(row and row["got"] == 1)
+
+
+def unlock_seat_slot(seat_id, cur):
+    """释放座位锁。放在 finally 里调，别让异常把锁漏掉。"""
+    try:
+        cur.execute("SELECT RELEASE_LOCK(%s) AS released", (_seat_lock_name(seat_id),))
+        cur.fetchone()
+    except Exception:
+        # 连接已经断了就无所谓了：连接级锁会随连接一起释放
+        pass
+
+
+def _seat_lock_name(seat_id):
+    """咨询锁名：MySQL 锁名最长 64 字符，这里远小于上限。"""
+    return f"seat_slot_{int(seat_id)}"
 
 
 def list_by_user(user_id, offset=0, limit=20):

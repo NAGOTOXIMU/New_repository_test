@@ -64,6 +64,35 @@ def list_available(store_id, reserve_date, start_time, end_time):
         return cur.fetchall()
 
 
+def list_with_occupancy(store_id, reserve_date, start_time, end_time):
+    """某门店全部座位 + 「这个时段是否被预约占用」的实时标记。
+
+    和 list_available() 的区别：
+        list_available 只返回空闲座位（给下拉框选座位用）；
+        本函数把**所有**座位都返回，多带一列 busy，供首页/看板的座位一览展示
+        实时的「空闲 / 使用中」。seat.status 只表示维修中(0)或可用(1)，
+        跟预约无关，所以界面上要判断占用必须走这里。
+
+    busy = 1 表示该座位在这个时段已经有一条有效预约（active_flag 不为 NULL）。
+    取消预约会把 active_flag 置 NULL，于是这里的 busy 自动回到 0。
+    """
+    with read_cursor() as cur:
+        cur.execute(
+            f"SELECT {_FIELDS}, ("
+            "  SELECT COUNT(*) FROM reservation_order r WHERE r.seat_id = s.seat_id "
+            "  AND r.reserve_date = %s AND r.active_flag IS NOT NULL "
+            "  AND r.start_time < %s AND r.end_time > %s"
+            ") AS busy FROM seat s WHERE s.store_id = %s ORDER BY s.seat_code",
+            (reserve_date, end_time, start_time, store_id),
+        )
+        return cur.fetchall()
+
+
+def count_free_now(store_id, reserve_date, start_time, end_time):
+    """某门店在该时段真正空闲的座位数（可用且没被有效预约占用）。"""
+    return len(list_available(store_id, reserve_date, start_time, end_time))
+
+
 def is_free(seat_id, reserve_date, start_time, end_time):
     """单个座位在某时段是否空闲。返回 True / False。"""
     with read_cursor() as cur:

@@ -53,6 +53,15 @@ st.caption(f"时段：{reserve_date} {start_str[:5]} ~ {end_str[:5]}（{duration
 
 # —— 选座位 ——
 available = store_service.find_available_seats(store_id, reserve_date, start_str, end_str)
+
+# 提醒一句「现在」的占用情况，免得和首页的座位状态对不上
+_now_date, _now_str, _ = order_service.current_slot()
+_now_overview = store_service.seat_overview(store_id, _now_date, _now_str, _now_str)
+_now_busy = sum(1 for s in _now_overview if s["seat_state"] == "occupied")
+if _now_busy:
+    st.caption(f"注：本店此刻有 {_now_busy} 个座位正在使用中（它们只在你选的时段不冲突时"
+               "才会出现在下面的列表里）。")
+
 if not available:
     st.warning("这个时段没有空闲座位了，换个时段试试。")
     st.stop()

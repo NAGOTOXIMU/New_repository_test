@@ -71,7 +71,11 @@ def _seed_base(cur):
             "INSERT INTO store (store_id, store_name, address, open_time, close_time, "
             "seat_count, status) VALUES (%s,%s,%s,%s,%s,0,1) "
             "ON DUPLICATE KEY UPDATE store_name=VALUES(store_name), address=VALUES(address), "
-            "open_time=VALUES(open_time), close_time=VALUES(close_time)",
+            "open_time=VALUES(open_time), close_time=VALUES(close_time), "
+            # status 也要一起置回营业：否则之前被人手工停业（或被冒烟测试改成 status=0）
+            # 的门店，重新灌 seed 也还是停业，用户端首页会整个看不到这家门店和它的座位。
+            # 与 db/sql/03_seed.sql 的口径保持一致。
+            "status=VALUES(status)",
             (sid, name, addr, open_t, close_t),
         )
 

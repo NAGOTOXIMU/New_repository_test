@@ -41,6 +41,23 @@ def make_end_time(start_time, duration_minutes: int) -> str:
     return to_time_str(to_minutes(start_time) + int(duration_minutes))
 
 
+def current_slot():
+    """当前时刻的查询时段 (date, start_time, end_time)，格式与库里一致。
+
+    「这个座位现在被占用了吗」= 有没有一条有效预约满足
+    start_time <= 现在 < end_time。直接把当前时刻当查询区间用即可：
+    对区间重叠判定来说，「区间包含某一点」就是「与那个点重叠」，
+    所以首页/看板不需要另外写一套 SQL。
+
+    示例：现在 14:30 → (date(今天), '14:30:00', '14:30:00')，
+    14:00~16:00 的预约会命中（start < 14:30 且 end > 14:30），
+    而 09:00~11:00 的历史预约不会命中。
+    """
+    now = datetime.now()
+    hhmmss = now.strftime("%H:%M:%S")
+    return now.date(), hhmmss, hhmmss
+
+
 def normalize_duration(duration) -> int:
     """校验并规整时长（分钟）：必须是整小时、在 1~8 小时之间。"""
     try:
@@ -152,9 +169,12 @@ def reserve(user_id, seat_id, reserve_date, start_time, duration, card_id=None,
             store_id=None):
     """预约座位。成功返回 dict，失败抛 BizError。
 
-    两道并发防线：
+    四道并发防线（顺序不能乱，见 docs/DESIGN.md「预约下单的四道防线」）：
         1) 扣费靠 SQL 的 balance >= x / remaining_* >= x 条件（原子，见 user_card_repo）
-        2) 占座位靠唯一索引 uk_seat_slot —— 插不进去就说明被人抢了
+        2) FOR UPDATE 锁卡 —— 并发下不会扣穿同一张卡
+        3) GET_LOCK 锁座位 —— 把「查重叠 + 插入」串行化，这是唯一能挡住
+           **部分重叠时段**（09:00~11:00 与 10:00~12:00）的机制
+        4) uk_seat_slot 唯一索引兜底完全相同 / 同开始时间的时段
     """
     duration = normalize_duration(duration)
 
@@ -184,6 +204,9 @@ def reserve(user_id, seat_id, reserve_date, start_time, duration, card_id=None,
     card = _pick_card(user_id, card_id)
     order_no = reservation_repo.generate_order_no()
 
+    # GET_LOCK 是「连接级」锁：必须用**同一条连接**释放，不能另开一条连接去 unlock。
+    # 所以这里在事务正常走完之后、uow 关连接之前，用同一个 cur 直接解锁。
+    # 抛异常的分支不用管：uow 会关闭那条连接，连接级锁随连接一起释放。
     try:
         with uow() as cur:
             # 锁住这张卡，防止并发扣同一张
@@ -192,6 +215,17 @@ def reserve(user_id, seat_id, reserve_date, start_time, duration, card_id=None,
                 raise BizError("这张卡当前不可用")
             if locked["expire_at"] is not None and locked["expire_at"] < date.today():
                 raise BizError("这张卡已过期")
+
+            # 再锁座位：把「同一个座位的时段冲突检查 + 插入」串行化。
+            # 顺序固定为「先卡后座位」，和其他事务保持一致，避免交叉死锁。
+            if not reservation_repo.lock_seat_slot(seat_id, cur):
+                raise BizError("有人正在预约这个座位，请稍后重试")
+
+            # 拿到锁之后再查重叠，这次查的结果在锁释放前都有效。
+            # 唯一索引只挡「完全相同的时段」，挡不住部分重叠，所以这一查是必需的。
+            if seat_repo.has_active_reservation(cur, seat_id, reserve_date,
+                                                start_time, end_time):
+                raise BizError("这个时段已经被预约了，请换一个时段或座位")
 
             amount = _charge(cur, locked, duration)
 
@@ -203,8 +237,11 @@ def reserve(user_id, seat_id, reserve_date, start_time, duration, card_id=None,
 
             # 扣完卡内资产，同步 user 表汇总
             user_repo.refresh_summary(cur, user_id)
+
+            # 事务最后一步、也是同一条连接：把座位锁还回去
+            reservation_repo.unlock_seat_slot(seat_id, cur)
     except pymysql.err.IntegrityError as e:
-        # uk_seat_slot 撞了 = 这个时段刚被别人约走
+        # uk_seat_slot 撞了 = 这个时段刚被别人约走（正常抢座之外的最后一道兜底）
         if "uk_seat_slot" in str(e):
             raise BizError("这个时段刚刚被别人约走了，请换一个")
         raise BizError("下单失败，请重试")
@@ -245,7 +282,12 @@ def cancel(order_id, user_id):
 def check_in(order_id, user_id=None):
     """到店签到：待使用(1) -> 进行中(2)。
 
-    注意：这一步由谁触发还没拍板（管理员手工签到 or 定时任务），见 DESIGN.md 的 A1。
+    现在这一步**平时不需要人工点了**：到了预约开始时间，页面打开时
+    sync_time_status() 会自动把订单推进到「进行中」。
+    本函数保留下来作为「提前到店、手动提前开始」的入口，也方便管理端纠错。
+
+    注意：一旦订单已经被自动流转成「进行中」或「已完成」，再点签到会提示
+    「只有待使用的预约可以签到」，这是预期行为。
     """
     res = reservation_repo.get_by_id(order_id)
     if res is None:
@@ -272,6 +314,20 @@ def finish(order_id):
 def expire_overdue():
     """把过期未使用的预约标成已过期(5)并释放时段。返回更新行数。"""
     return reservation_repo.expire_overdue()
+
+
+def sync_time_status():
+    """按当前时间自动推进订单状态，返回 (新变进行中, 新变已完成) 条数。
+
+    这个项目没有常驻定时任务（Streamlit 进程只在有人访问时活着），所以
+    「到点自动变进行中」用「打开页面时顺手推一把」的方式实现：
+    用户端首页/我的订单、管理端订单管理/看板每次渲染时调一次，
+    由 ui/components.py 的 sync_time_status_once() 做 60 秒节流，
+    不会每点一次按钮都写一次库。
+
+    失败不能影响页面渲染：调用方用 try/except 包住（见 components 里的封装）。
+    """
+    return reservation_repo.sync_time_status()
 
 
 def list_my_orders(user_id, page=1, page_size=20):

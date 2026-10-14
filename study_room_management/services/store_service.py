@@ -142,3 +142,37 @@ def update_seat(seat_id, **fields):
 def find_available_seats(store_id, reserve_date, start_time, end_time):
     """某门店某时段还空着的座位（预约页直接用）。"""
     return seat_repo.list_available(store_id, reserve_date, start_time, end_time)
+
+
+def seat_overview(store_id, reserve_date, start_time, end_time):
+    """座位一览（含实时占用状态），给用户端首页/运营看板用。
+
+    每个座位返回 seat 原有字段 + 两个派生字段：
+        busy     : True 表示这个时段已被一条有效预约占着（在座/被订走）
+        seat_state: 'free' 空闲 / 'occupied' 使用中 / 'repairing' 维修中
+
+    为什么不能只看 seat.status：seat.status 只区分「维修中(0) / 可用(1)」，
+    和预约完全无关；用户首页要显示「被我预约的那个座位已被占用」，
+    必须按 reserve_date + 时段去 reservation_order 里查重叠，见
+    repository/seat_repo.list_with_occupancy。
+    """
+    rows = seat_repo.list_with_occupancy(store_id, reserve_date, start_time, end_time)
+    result = []
+    for row in rows:
+        item = dict(row)
+        # MySQL 的 COUNT() 是 decimal.Decimal，这里统一成 bool
+        busy = bool(int(item.get("busy") or 0))
+        item["busy"] = busy
+        if int(item["status"]) != STATUS_ON:
+            item["seat_state"] = "repairing"
+        elif busy:
+            item["seat_state"] = "occupied"
+        else:
+            item["seat_state"] = "free"
+        result.append(item)
+    return result
+
+
+def count_free_now(store_id, reserve_date, start_time, end_time):
+    """某时段真正空闲的座位数 = 可用 且 没被有效预约占用。"""
+    return seat_repo.count_free_now(store_id, reserve_date, start_time, end_time)

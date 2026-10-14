@@ -5,10 +5,12 @@
 import streamlit as st
 
 from services import stats_service, store_service
-from ui.components import kind_name, require_role, sidebar_user
+from ui.components import kind_name, require_role, sidebar_user, sync_time_status_once
 
 require_role("admin")
 sidebar_user()
+# 看板的「待使用 / 已完成」计数依赖订单状态，先按当前时间推一把（60 秒节流）
+sync_time_status_once()
 
 st.title("运营数据看板")
 
@@ -94,7 +96,9 @@ if stores:
     for s in stores:
         util_rows.append({
             "门店": s["store_name"],
-            "可用座位": store_service.count_seats(s["store_id"], status=1),
+            # 注意：这是「没在维修」的座位数（seat.status=1），不是此刻空闲数；
+            # 此刻空闲数要按当前时刻的有效预约算，见 store_service.count_free_now()
+            "可用座位（不含维修）": store_service.count_seats(s["store_id"], status=1),
             "利用率": f"{stats_service.seat_utilization(s['store_id'], days) * 100:.2f}%",
         })
     st.dataframe(util_rows, width="stretch", hide_index=True)

@@ -1,7 +1,7 @@
 """管理端 · 订单管理。
 
 功能：预约订单与充值订单列表（按门店/状态/日期区间筛选）、推进预约状态、退款。
-注意：状态推进口径见 docs/DESIGN.md 的 A1（暂定由管理员手工操作）。
+状态推进口径见 docs/DESIGN.md：到点自动流转（sync_time_status）+ 管理员手工签到兜底。
 """
 import streamlit as st
 
@@ -9,10 +9,14 @@ from config import (ORDER_DONE, ORDER_ONGOING, ORDER_PENDING, ORDER_STATUS_NAMES
                     PAY_PAID, PAY_STATUS_NAMES)
 from services import order_service, recharge_service, store_service
 from services.exceptions import BizError
-from ui.components import flash, order_status_name, pay_status_name, require_role, sidebar_user
+from ui.components import (flash, order_status_name, pay_status_name, require_role,
+                           sidebar_user, sync_time_status_once)
 
 require_role("admin")
 sidebar_user()
+# 先按当前时间推进状态：时段开始的「待使用」→「进行中」，时段结束的 →「已完成」。
+# 手工「签到」按钮保留，用于提前开始或纠错。60 秒内只同步一次。
+auto_moved = sync_time_status_once()
 flash()
 
 admin = st.session_state.get("user") or {}
@@ -20,6 +24,9 @@ admin = st.session_state.get("user") or {}
 locked_store_id = admin.get("store_id")
 
 st.title("订单管理")
+if auto_moved and any(auto_moved):
+    st.caption(f"已按当前时间自动更新：{auto_moved[0]} 条转为「进行中」，"
+               f"{auto_moved[1]} 条转为「已完成」。")
 if locked_store_id:
     st.caption(f"你负责的门店 ID：{locked_store_id}（只能看到本店订单）")
 else:

@@ -8,9 +8,12 @@ import streamlit as st
 from config import ORDER_CANCELLABLE, ORDER_STATUS_NAMES
 from services import order_service
 from services.exceptions import BizError
-from ui.components import flash, area_name, sidebar_user
+from ui.components import flash, area_name, sidebar_user, sync_time_status_once
 
 user = sidebar_user()
+# 打开订单列表前先按当前时间推进状态：到点的「待使用」自动变「进行中」，
+# 时段过了的自动变「已完成」（60 秒内只同步一次）
+sync_time_status_once()
 flash()
 if user.get("role") != "user":
     st.error("这页是用户端页面，请用用户账号登录。")

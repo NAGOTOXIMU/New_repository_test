@@ -59,7 +59,7 @@ MySQL 8.0
 | `card_type` | 卡种字典 | `kind` 1时长卡 / 2次卡 / 3储值卡；`value` = 对应价值 |
 | `seat` | 座位 | `(store_id, seat_code)` 唯一；`area_type` 1普通/2安静/3靠窗 |
 | **`user_card`** | **用户持卡实例（账户）** | 余额 / 剩余次数 / 剩余分钟，**按卡归属** |
-| `reservation_order` | 座位预约 | `uk_seat_slot` 唯一索引防抢座 |
+| `reservation_order` | 座位预约 | `uk_seat_slot` 唯一索引 + 座位级 `GET_LOCK` 防抢座 |
 | `recharge_order` | 充值购卡订单 | `order_no` 唯一索引做幂等 |
 
 ### 四个关键设计点
@@ -67,13 +67,24 @@ MySQL 8.0
 1. **`user_card` 是系统的枢纽**：充值让它加，预约让它减，退款让它回。
    它是"账户状态"，`recharge_order` 是"资金流水"——**两者成对才能对账**。
    （规范里缺的就是这张；没有它，"扣费逻辑"无处落地。）
-2. **防抢座靠数据库，不靠代码判断**：
-   唯一索引 `uk_seat_slot (seat_id, reserve_date, start_time, active_flag)`
-   —— 同一个座位、同一天、同一个开始时间，只能有一条有效预约。
+2. **防抢座靠数据库 + 一把座位锁**：
+   唯一索引 `uk_seat_slot (seat_id, reserve_date, start_time, end_time, active_flag)`
+   —— 同一个座位、同一天、同一个时段，只能有一条有效预约。
+   ⚠️ 但唯一索引**判不出「部分重叠」**（09:00~11:00 与 10:00~12:00 开始时间不同），
+   所以下单流程里还有一道座位级互斥锁（`GET_LOCK('seat_slot_<seat_id>')`）：
+   锁住 → 查重叠 → 插入 → 释放，同一个座位的下单被串行化，见
+   `services/order_service.py: reserve()` 与 `repository/reservation_repo.py: lock_seat_slot()`。
 3. **取消预约时把 `active_flag` 置为 `NULL`**：
    MySQL 的 UNIQUE 索引允许多个 NULL，于是取消后该时段能被重新预约。
    （若只改成 `order_status=4`，唯一键仍被占住，时段就永久约不了了。）
+   ⚠️ 只有「取消」和「日期已过」才置 NULL。订单走到「已完成」时**不释放**时段，
+   否则历史预约挡不住重复预约。
 4. **`(seat_id, store_id)` 复合外键**：杜绝"预约记录的门店 ≠ 座位的门店"这种脏数据。
+5. **座位是否「被占用」是算出来的，不是存出来的**：
+   `seat.status` 只表示「可用 / 维修中」，跟预约无关。要判断某时刻座位有没有人，
+   必须拿 `reserve_date + 时段`去 `reservation_order` 里查有效预约的重叠
+   （`seat_repo.list_with_occupancy()`），时间一过就自然回到空闲，
+   不需要任何定时任务去改座位表。
 
 ### 关系速查
 
@@ -96,9 +107,20 @@ store ──1:N──> admin           user ──1:N──> recharge_order ─�
 |---|---|---|---|
 | 注册 / 登录 | `user` | ❌ 单条 INSERT 本身原子 | `phone` 唯一索引 |
 | 充值购卡 | `recharge_order` + `user_card` | ✅ | `order_no` 唯一索引（防按钮双击重复下单） |
-| 座位预约 | `reservation_order` + `user_card` | ✅ | `FOR UPDATE` 锁卡 + `uk_seat_slot` 唯一索引 |
+| 座位预约 | `reservation_order` + `user_card` | ✅ | `FOR UPDATE` 锁卡 + **座位级 `GET_LOCK`** + 锁内重叠查询 + `uk_seat_slot` 唯一索引兜底 |
 | 取消预约 | `reservation_order` + `user_card` | ✅ | `active_flag` 置 NULL 释放时段，权益原路退回 |
 | 退款 | `recharge_order` + `user_card` | ✅ | `pay_status=1→2` 条件更新；权益已被消费则拒绝 |
+
+**预约下单的四道防线**（`services/order_service.py: reserve()`，顺序不能乱）：
+
+1. `SELECT ... FOR UPDATE` 锁住用户的卡 —— 防止并发扣同一张卡的余额 / 次数 / 分钟；
+2. `GET_LOCK('seat_slot_<seat_id>')` 锁住这个座位 —— 把「查冲突 + 插入」串行化，
+   这是唯一能挡住**部分重叠时段**的机制；锁顺序固定为「先卡后座位」，避免死锁；
+3. 锁内再查一次 `seat_repo.has_active_reservation()` 的重叠 —— 有冲突就报人话错误，
+   而不是等数据库抛唯一键异常；
+4. `uk_seat_slot` 唯一索引兜底完全相同的时段（例如客户端重复提交），
+   撞了会 `IntegrityError`，转成「这个时段刚刚被别人约走了」。
+
 
 **计费口径**（规范里座位表没有价格列，所以按「卡」计费）：
 
@@ -138,8 +160,8 @@ store ──1:N──> admin           user ──1:N──> recharge_order ─�
 
 | # | 问题 | 最终裁决 | 落地位置 |
 |---|---|---|---|
-| **A1** | 「待使用」→「进行中」谁推进？ | **① 管理员在管理端手工签到**（另留 `expire_overdue()` 供将来接定时任务批量置「已过期」） | `services/order_service.py: check_in()` / `expire_overdue()`，页面 `admin/3_order_manage.py` |
-| **A2** | 超时未到怎么算？ | 预约日期过了仍未使用的，由 `expire_overdue()` 置 `order_status=5` 并**释放时段**；不额外扣费（因为费用在预约时已扣，取消才退） | `repository/reservation_repo.py: expire_overdue()` |
+| **A1** | 「待使用」→「进行中」谁推进？ | **① 定时任务自动推进**：项目没有常驻调度器，所以做成「打开页面时同步 + 60 秒节流」——预约时段一开始，`sync_time_status()` 把当天该时段的「待使用」置「进行中」，时段结束后置「已完成」。**② 管理员手工签到**保留，用于提前开始或纠错。**③ `expire_overdue()`** 继续负责日期已过的批量置「已过期」 | `repository/reservation_repo.py: sync_time_status()` / `expire_overdue()`；`ui/components.py: sync_time_status_once()`；页面 `user/1_home_store.py`、`user/3_my_orders.py`、`admin/3_order_manage.py`、`admin/5_dashboard.py` |
+| **A2** | 超时未到怎么算？ | 预约日期过了仍未使用的，由 `expire_overdue()` 置 `order_status=5` 并**释放时段**；**当天时段已过**的则由 `sync_time_status()` 置「已完成(3)」（日期还没过，叫"过期"不合适，且**不释放时段**）；两种情况都不额外扣费（费用在预约时已扣，取消才退） | `repository/reservation_repo.py: expire_overdue()` / `sync_time_status()` |
 | **A3** | 扣费规则？ | **按卡种计费**（规范里座位表没有价格列）：时长卡扣分钟、次卡扣 1 次、储值卡扣 `小时单价 × 小时数` | `services/order_service.py: _charge()` / `_hourly_rate()`，口径见 `docs/数据库规范落地对照与缺口补充.md` 缺口 4 |
 | **A4** | 多张卡用哪张？ | **① 用户在预约页手选**（下拉框列出所有可用卡），未指定时自动取第一张可用卡 | `services/order_service.py: _pick_card()`，页面 `user/2_seat_reservation.py` |
 | **A5** | 同一用户同一时段能约几个座位？ | **允许多个**（一个用户可以给自己和朋友各占一个座位）。若要限制为 1 个，需再加唯一约束 `uk_user_slot (user_id, reserve_date, start_time, active_flag)` | 当前未加约束 |

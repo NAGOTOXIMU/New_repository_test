@@ -80,6 +80,7 @@ h1, h2, h3{font-family:Georgia,'Source Serif 4','Songti SC','SimSun',serif !impo
   font-weight:500; border-radius:var(--r-sm); white-space:nowrap}
 .pill.mint{background:var(--mint); color:var(--mint-ink)}
 .pill.peach{background:var(--peach); color:var(--peach-ink)}
+.pill.muted{background:#eef0f2; color:var(--ink-3)}
 
 /* ── 指标卡（设计稿 .metrics / .metric，直接用 HTML 渲染，不再用 st.metric） ── */
 .metrics{display:grid; grid-template-columns:repeat(auto-fit,minmax(175px,1fr));

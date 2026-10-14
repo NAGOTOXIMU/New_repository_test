@@ -18,8 +18,9 @@
 --    seat               PRIMARY, uk_seat_store_code, uk_seat_id_store, idx_seat_store_status
 --    user_card          PRIMARY, uk_card_no, idx_uc_user_type, idx_uc_user_status_expire
 --    reservation_order  PRIMARY, uk_reservation_no,
---                       uk_seat_slot（规范）, idx_res_store_date（规范）, idx_res_user_status（规范）,
---                       idx_res_date_status, idx_res_card
+--                       uk_seat_slot（规范；含 end_time，老库要用 04_migrate 升级）,
+--                       idx_res_store_date（规范）, idx_res_user_status（规范）,
+--                       idx_res_date_status(含 start_time，供状态自动流转), idx_res_card
 --    recharge_order     PRIMARY, uk_recharge_no, idx_ro_user_status（规范）,
 --                       idx_ro_paytime, idx_ro_card
 

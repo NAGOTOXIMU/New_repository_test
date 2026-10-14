@@ -52,9 +52,10 @@ study_room_management/
 ├─ db/                   连接与事务工具
 │  ├─ connection.py      连接获取、read_cursor / write_cursor
 │  ├─ uow.py             事务上下文管理器
-│  ├─ init_db.py         一键建库建表（执行 sql/ 下的脚本）
+│  ├─ init_db.py         一键建库建表（--migrate 做老库结构升级）
 │  ├─ seed.py            灌测试数据（用项目自己的密码哈希算法）
 │  └─ sql/               01_schema.sql / 02_indexes.sql / 03_seed.sql
+│                        / 04_migrate_uk_seat_slot.sql（老库升级用）
 ├─ repository/           数据访问层：所有 SQL 只在这里
 ├─ services/             业务层：校验规则 + 事务边界
 ├─ ui/                   界面层：唯一认识 Streamlit 的地方
@@ -143,11 +144,19 @@ copy .env.example .env
 python -m db.init_db --with-seed --yes
 python -m db.seed --with-orders      # 补历史订单，供数据看板演示
 
+# 3b.【已经建过库的机器】拉完新代码要跑一次结构迁移（不清数据）
+python -m db.init_db --migrate
+
 # 4. 启动
 python -m streamlit run app.py
 ```
 
 浏览器访问 `http://localhost:8501`。停止服务按 `Ctrl+C`。
+
+> ⚠️ **老库升级**：`db/sql/01_schema.sql` 改过表结构（`uk_seat_slot` 加了 `end_time`）。
+> 全新安装不用管；**已经在用的库**必须执行 `python -m db.init_db --migrate` 升级索引，
+> 否则唯一键还是旧的。脚本会打印 `uk_seat_slot 检查：...` 告诉你当前是新键还是旧键。
+> 迁移细节和冲突数据预检查见 `db/sql/04_migrate_uk_seat_slot.sql` 的注释。
 
 ### 也可以用 MySQL 客户端手工执行
 
@@ -156,6 +165,8 @@ mysql -u root -p < db/sql/01_schema.sql
 mysql -u root -p < db/sql/02_indexes.sql
 mysql -u root -p study_room_management < db/sql/03_seed.sql
 ```
+
+> 已经建过库的机器升级结构：`mysql -u root -p study_room_management < db/sql/04_migrate_uk_seat_slot.sql`
 
 > `db/sql/03_seed.sql` 只灌主数据（门店/座位/卡种/用户/卡/管理员）；
 > 历史订单含动态日期，用 `python -m db.seed --with-orders` 灌更合适。
